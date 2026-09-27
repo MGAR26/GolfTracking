@@ -30,6 +30,7 @@ npm run test:e2e     # Playwright: full round from one phone, two-phone live upd
 npm run check        # lint + typecheck + unit tests
 npm run db:generate  # regenerate SQL migrations in ./drizzle after editing src/db/schema.ts
 npm run db:reset     # delete the local embedded database
+npm run prototype    # build the clickable browser prototype into prototype/dist (real domain logic, in-memory store)
 ```
 
 Local Playwright note: if your machine ships its own Chromium, point at it with `PW_CHROMIUM_PATH=/path/to/chrome npm run test:e2e`.

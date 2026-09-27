@@ -14,7 +14,8 @@
     "db:generate": "drizzle-kit generate",
     "db:seed": "tsx scripts/seed.ts",
     "db:reset": "tsx scripts/reset-db.ts",
-    "check": "npm run lint && npm run typecheck && npm test"
+    "check": "npm run lint && npm run typecheck && npm test",
+    "prototype": "node scripts/build-prototype.mjs"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",

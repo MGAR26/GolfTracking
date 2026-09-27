@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ScoreEntry } from "@/components/ScoreEntry";
 import { Page } from "@/components/ui";
 import { findScore, loadRoundSnapshot } from "@/server/services/roundProjection";
@@ -17,6 +17,8 @@ export default async function ScorePage({ params, searchParams }: { params: Prom
   const actor = await getActor();
   const requested = sp.hole ? parseInt(sp.hole, 10) : NaN;
   const holeNumber = Number.isInteger(requested) && snap.holes.some((h) => h.holeNumber === requested) ? requested : (snap.currentHole ?? snap.holes[snap.holes.length - 1].holeNumber);
+  // Pin the hole in the URL so a re-render after the last player's score never jumps ahead mid-entry.
+  if (holeNumber !== requested) redirect(`/rounds/${roundId}/score?hole=${holeNumber}${sp.player ? `&player=${sp.player}` : ""}`);
   const hole = snap.holes.find((h) => h.holeNumber === holeNumber)!;
   const idx = snap.holes.findIndex((h) => h.holeNumber === holeNumber);
   const prev = idx > 0 ? snap.holes[idx - 1].holeNumber : null;
