@@ -22,10 +22,16 @@ async function scoreHole(page: Page, hole: number, scores: Record<string, number
     const row = page.getByRole("region", { name: `${name} hole entry` });
     const plus = row.getByRole("button", { name: "Plus one stroke" });
     const minus = row.getByRole("button", { name: "Minus one stroke" });
-    const parButton = row.getByRole("button", { name: /Set score to par/ });
-    const par = Number((await parButton.getAttribute("aria-label"))!.match(/par (\d+)/)![1]);
-    await parButton.click();
-    const diff = target - par;
+    const scoreButton = row.getByRole("button", { name: /Set score to par|^Score \d+$/ });
+    const label = (await scoreButton.getAttribute("aria-label"))!;
+    let current: number;
+    if (label.startsWith("Set score")) {
+      await scoreButton.click(); // sets par
+      current = Number(label.match(/par (\d+)/)![1]);
+    } else {
+      current = Number(label.match(/Score (\d+)/)![1]);
+    }
+    const diff = target - current;
     for (let i = 0; i < Math.abs(diff); i++) await (diff > 0 ? plus : minus).click();
     await expect(row.getByRole("button", { name: `Score ${target}` })).toBeVisible();
   }

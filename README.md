@@ -1,6 +1,6 @@
 # Golf Trip OS
 
-Mobile-first golf trip operating system: scoring, handicaps, games, side bets, statistics and settlement, built around the **trip** rather than a single scorecard. This repo is Phase 0 (foundation) plus the Phase 1 vertical slice from the build spec, with the six V1 game engines and the side-bet / ledger loop already wired end to end.
+Mobile-first golf trip operating system: scoring, handicaps, games, side bets, statistics and settlement, built around the **trip** rather than a single scorecard. This repo covers Phase 0 (foundation), the Phase 1 vertical slice, Phase 2 live collaboration (realtime, offline queue, conflict reconciliation), the six V1 game engines and the side-bet / ledger loop from the build spec.
 
 ## Stack
 
@@ -26,7 +26,7 @@ Other scripts:
 
 ```bash
 npm test             # domain unit tests (handicap, allocation, games, ledger, settlement, stats, side bets)
-npm run test:e2e     # Playwright: seeds an in-memory DB, scores a full round from one phone, settles a bet, locks the round
+npm run test:e2e     # Playwright: full round from one phone, two-phone live updates + conflict reconciliation, offline replay
 npm run check        # lint + typecheck + unit tests
 npm run db:generate  # regenerate SQL migrations in ./drizzle after editing src/db/schema.ts
 npm run db:reset     # delete the local embedded database
@@ -80,6 +80,12 @@ Migrations in `./drizzle` run automatically on first connection. Auth is not wir
 
 `users`, `player_profiles`, `trips`, `trip_members`, `trip_days`, `courses`, `tee_sets`, `holes`, `rounds`, `round_players` (HI snapshot, raw + rounded Course Handicap, playing handicap, scorer), `hole_scores` (versioned, `updated_by`, `client_event_id`), `games`, `game_teams`, `game_participants`, `game_results`, `trip_competitions`, `side_bets`, `side_bet_participants`, `side_bet_resolutions`, `ledger_entries`, `audit_events`.
 
+### Live collaboration (Phase 2)
+
+- **Realtime:** services publish to an in-process bus after each commit (`src/server/realtime/bus.ts`); `/api/rounds/[roundId]/events` streams them as server-sent events and `RoundLive` refreshes the round views on other phones. Hole entry adopts newer server state for rows with no local edits in progress. The bus is per Node instance; multi-instance deployments swap `publishRoundChange` for Supabase Realtime / Postgres NOTIFY.
+- **Offline queue:** a failed or offline save is coalesced per hole into a localStorage queue (`src/lib/offlineQueue.ts`) with a `client_event_id`; `SyncManager` replays in order on reconnect and every 15s, and the row shows *Queued offline → Synced*. Replays are idempotent server-side.
+- **Conflicts:** a stale-version save returns the accepted edit; the phone offers *Keep theirs / Use mine / Ask organizer*. Escalated (or offline-replay) conflicts land in `score_conflicts`, and the organizer reconciles them from the round overview with an audit trail.
+
 ### Permissions
 
 `src/server/services/permissions.ts`: trip owner / organizer can edit anyone; `GROUP_SCORER` → designated scorer only; `INDIVIDUAL` → own row only; `HYBRID` → own row or scorer. Scores are versioned; a save with a stale version returns a conflict and the UI offers *Keep theirs* / *Use mine*.
@@ -97,12 +103,12 @@ Migrations in `./drizzle` run automatically on first connection. Auth is not wir
 ## Known gaps (next phases)
 
 - **Auth:** no Supabase Auth / Clerk yet; the acting player is a cookie. `getActor()` in `src/server/actor.ts` is the single swap point.
-- **Realtime + offline:** saves are optimistic with version conflicts, but there is no broadcast channel or IndexedDB queue yet (`client_event_id` is already accepted for idempotent replay).
+- **Multi-instance realtime:** the change bus is in-process; hosted deployments with more than one server need Supabase Realtime or Postgres NOTIFY behind `publishRoundChange`.
 - **Course provider:** manual entry and saved courses only; the `CourseProvider` adapter has not been added.
 - **Trip competitions:** total gross / net / money are shown; placement points, Ryder Cup points and per-competition round selection are not configurable yet.
 - **Presses**, Wolf, Vegas, greenies and the Phase 2 game library.
 - PWA install prompt / service worker (manifest is in place).
 
-## Recommended next prompt (Phase 2)
+## Recommended next prompt (auth + Phase 5 trip OS)
 
-> Implement Phase 2 (live collaboration) for Golf Trip OS. Keep the domain layer untouched. 1) Add Supabase Auth (email magic link) and map sessions to `player_profiles`, replacing the cookie actor in `src/server/actor.ts`; keep guest players. 2) Add realtime: broadcast `hole_scores` changes per round (Supabase Realtime when `DATABASE_URL` is set, an in-process event emitter + SSE route for the PGlite dev path) and refresh round views live. 3) Add an offline queue: persist pending `saveScoreAction` calls in IndexedDB with `client_event_id`, replay in order on reconnect, and surface synced / pending / conflicted state per hole. 4) Add organizer conflict resolution UI listing conflicted holes. 5) Extend Playwright with a two-context test where two players edit the same hole and one reconciles.
+> Golf Trip OS: 1) Add Supabase Auth (email magic link + Google). Map sessions to `player_profiles` (guest profiles stay claimable by invite link), replace the cookie actor in `src/server/actor.ts`, and gate mutations by trip membership. 2) Add trip invites: owner generates a link; a signed-in user claims a guest seat. 3) Trip competitions: make `trip_competitions` configurable (placement points, Ryder Cup team points, skins won, birdies, CTP) with per-competition round inclusion, and show the prominent ones on the trip dashboard. 4) Trip days: group rounds by day with pairings/tee times, and make "Start today's round" pick the next unplayed round. Keep the domain layer pure and add Vitest coverage for placement/team points.

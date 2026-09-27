@@ -8,6 +8,8 @@ import { getTripLedger } from "@/server/services/tripService";
 import { computeNetBalances } from "@/domain/ledger";
 import { money } from "@/lib/format";
 import { reopenRoundFormAction } from "@/app/actions/rounds";
+import { listOpenConflicts } from "@/server/services/conflictService";
+import { ConflictPanel } from "@/components/ConflictPanel";
 
 export default async function RoundOverviewPage({ params }: { params: Promise<{ roundId: string }> }) {
   const { roundId } = await params;
@@ -23,12 +25,20 @@ export default async function RoundOverviewPage({ params }: { params: Promise<{ 
   const roundLedger = ledger.filter((e) => e.roundId === roundId);
   const balances = computeNetBalances(roundLedger, snap.players.map((p) => p.playerId));
   const canOrganize = !!me && (me.tripRole === "OWNER" || me.tripRole === "ORGANIZER");
+  const conflicts = canOrganize && live ? await listOpenConflicts(roundId) : [];
+  const nameOf = (id: string | null) => (id ? (snap.players.find((p) => p.playerId === id)?.displayName ?? null) : null);
   const highlights = snap.players.flatMap((p) =>
     snap.totals[p.playerId].holes.filter((h) => h.grossToPar !== null && h.grossToPar <= -1).map((h) => ({ player: p.displayName, hole: h.holeNumber, label: h.grossToPar === -1 ? "Birdie" : h.grossToPar === -2 ? "Eagle" : "Albatross" })),
   );
 
   return (
     <Page>
+      {conflicts.length > 0 && (
+        <ConflictPanel
+          roundId={roundId}
+          conflicts={conflicts.map((c) => ({ id: c.id, playerName: nameOf(c.playerId) ?? c.playerId, holeNumber: c.holeNumber, reporterName: c.reporterName, theirsUpdatedByName: nameOf(c.theirsUpdatedBy), mine: c.mine, theirs: c.theirs }))}
+        />
+      )}
       {live && hole ? (
         <Card className="!bg-green !border-green text-white">
           <div className="flex items-center justify-between">

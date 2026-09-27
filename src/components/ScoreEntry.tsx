@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveScoreAction, type SaveScoreActionResult } from "@/app/actions/scores";
+import { reportConflictAction } from "@/app/actions/conflicts";
+import { isNetworkError, offlineQueue } from "@/lib/offlineQueue";
+import type { HoleScorePatch } from "@/server/services/scoreService";
 import type { HoleEntry, FairwayResult } from "@/domain/types";
 import { StrokeDots } from "./ui";
 
@@ -15,7 +18,14 @@ export interface ScoreEntryPlayer {
   version: number;
 }
 
-type SyncState = { kind: "idle" } | { kind: "saving" } | { kind: "saved" } | { kind: "error"; message: string } | { kind: "conflict"; theirs: Extract<SaveScoreActionResult, { status: "conflict" }> };
+type SyncState =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "saved" }
+  | { kind: "queued" }
+  | { kind: "updated" }
+  | { kind: "error"; message: string }
+  | { kind: "conflict"; theirs: Extract<SaveScoreActionResult, { status: "conflict" }> };
 
 interface RowState {
   entry: HoleEntry;
@@ -27,13 +37,20 @@ interface RowState {
 export function ScoreEntry({ roundId, hole, players, focusPlayerId }: { roundId: string; hole: { holeNumber: number; par: number }; players: ScoreEntryPlayer[]; focusPlayerId?: string }) {
   const router = useRouter();
   const [rows, setRows] = useState<Record<string, RowState>>(() =>
-    Object.fromEntries(players.map((p) => [p.playerId, { entry: p.entry, version: p.version, sync: { kind: "idle" }, celebrate: null }])),
+    Object.fromEntries(
+      players.map((p) => {
+        const queued = offlineQueue.find(roundId, p.playerId, hole.holeNumber);
+        const entry = queued && queued.status === "pending" ? { ...p.entry, ...queued.patch } : p.entry;
+        return [p.playerId, { entry, version: p.version, sync: queued && queued.status === "pending" ? { kind: "queued" } : { kind: "idle" }, celebrate: null }];
+      }),
+    ),
   );
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   // Server versions live in a ref (mutated only from async callbacks / handlers) so the
   // debounced save always sends the latest version it has acknowledged.
   const versions = useRef<Record<string, number>>(Object.fromEntries(players.map((p) => [p.playerId, p.version])));
   const pendingPatch = useRef<Record<string, Partial<HoleEntry>>>({});
+  const inFlight = useRef<Record<string, boolean>>({});
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const scheduleRefresh = useCallback(() => {
@@ -41,21 +58,39 @@ export function ScoreEntry({ roundId, hole, players, focusPlayerId }: { roundId:
     refreshTimer.current = setTimeout(() => router.refresh(), 250);
   }, [router]);
 
+  const enqueue = useCallback(
+    (playerId: string, patch: Partial<HoleEntry>) => {
+      offlineQueue.enqueue({ roundId, playerId, holeNumber: hole.holeNumber, patch, expectedVersion: versions.current[playerId] ?? 0 });
+      setRows((r) => ({ ...r, [playerId]: { ...r[playerId], sync: { kind: "queued" } } }));
+    },
+    [roundId, hole.holeNumber],
+  );
+
   const flush = useCallback(
     async (playerId: string, expectedVersionOverride?: number) => {
       const patch = pendingPatch.current[playerId];
       if (!patch || Object.keys(patch).length === 0) return;
       pendingPatch.current[playerId] = {};
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        enqueue(playerId, patch);
+        return;
+      }
+      inFlight.current[playerId] = true;
       setRows((r) => ({ ...r, [playerId]: { ...r[playerId], sync: { kind: "saving" } } }));
       const expectedVersion = expectedVersionOverride ?? versions.current[playerId] ?? 0;
-      const result = await saveScoreAction({
-        roundId,
-        playerId,
-        holeNumber: hole.holeNumber,
-        patch,
-        expectedVersion,
-        clientEventId: crypto.randomUUID(),
-      });
+      let result: SaveScoreActionResult;
+      try {
+        result = await saveScoreAction({ roundId, playerId, holeNumber: hole.holeNumber, patch, expectedVersion, clientEventId: crypto.randomUUID() });
+      } catch (err) {
+        inFlight.current[playerId] = false;
+        if (isNetworkError(err)) {
+          enqueue(playerId, patch);
+          return;
+        }
+        setRows((r) => ({ ...r, [playerId]: { ...r[playerId], sync: { kind: "error", message: err instanceof Error ? err.message : "Save failed" } } }));
+        return;
+      }
+      inFlight.current[playerId] = false;
       if (result.status === "saved") versions.current[playerId] = result.version;
       else if (result.status === "conflict") versions.current[playerId] = result.version;
       setRows((r) => {
@@ -70,7 +105,7 @@ export function ScoreEntry({ roundId, hole, players, focusPlayerId }: { roundId:
       });
       if (result.status === "saved") scheduleRefresh();
     },
-    [roundId, hole.holeNumber, scheduleRefresh],
+    [roundId, hole.holeNumber, scheduleRefresh, enqueue],
   );
 
   const update = useCallback(
@@ -92,6 +127,43 @@ export function ScoreEntry({ roundId, hole, players, focusPlayerId }: { roundId:
     [flush, hole.par],
   );
 
+  // Adopt newer server state (another device saved this hole) when this row has nothing local in progress.
+  useEffect(() => {
+    setRows((r) => {
+      let changed = false;
+      const next = { ...r };
+      for (const p of players) {
+        const row = r[p.playerId];
+        if (!row) continue;
+        const busy = inFlight.current[p.playerId] || Object.keys(pendingPatch.current[p.playerId] ?? {}).length > 0 || row.sync.kind === "conflict" || row.sync.kind === "queued";
+        if (!busy && p.version > row.version) {
+          versions.current[p.playerId] = p.version;
+          next[p.playerId] = { ...row, entry: p.entry, version: p.version, sync: { kind: "updated" } };
+          changed = true;
+        }
+      }
+      return changed ? next : r;
+    });
+  }, [players]);
+
+  // When a queued save is replayed by the SyncManager, mark the row saved and pull the server copy.
+  useEffect(() => {
+    return offlineQueue.subscribe(() => {
+      setRows((r) => {
+        let changed = false;
+        const next = { ...r };
+        for (const p of players) {
+          const row = r[p.playerId];
+          if (row?.sync.kind === "queued" && !offlineQueue.find(roundId, p.playerId, hole.holeNumber)) {
+            next[p.playerId] = { ...row, sync: { kind: "saved" } };
+            changed = true;
+          }
+        }
+        return changed ? next : r;
+      });
+    });
+  }, [players, roundId, hole.holeNumber]);
+
   useEffect(() => {
     const t = timers.current;
     return () => Object.values(t).forEach(clearTimeout);
@@ -101,6 +173,29 @@ export function ScoreEntry({ roundId, hole, players, focusPlayerId }: { roundId:
     if (!focusPlayerId) return;
     document.getElementById(`player-${focusPlayerId}`)?.scrollIntoView({ block: "center" });
   }, [focusPlayerId]);
+
+  const adoptTheirs = (playerId: string, theirs: Extract<SaveScoreActionResult, { status: "conflict" }>) => {
+    pendingPatch.current[playerId] = {};
+    versions.current[playerId] = theirs.version;
+    setRows((r) => ({
+      ...r,
+      [playerId]: {
+        ...r[playerId],
+        version: theirs.version,
+        entry: {
+          ...r[playerId].entry,
+          grossScore: theirs.grossScore,
+          putts: theirs.putts,
+          fairwayResult: theirs.fairwayResult as FairwayResult | null,
+          gir: theirs.gir,
+          penaltyStrokes: theirs.penaltyStrokes,
+          obStrokes: theirs.obStrokes,
+        },
+        sync: { kind: "idle" },
+      },
+    }));
+    scheduleRefresh();
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -113,49 +208,27 @@ export function ScoreEntry({ roundId, hole, players, focusPlayerId }: { roundId:
             par={hole.par}
             row={row}
             onChange={(patch) => update(p.playerId, patch)}
-            onKeepTheirs={() => {
-              const theirs = (row.sync as Extract<SyncState, { kind: "conflict" }>).theirs;
-              pendingPatch.current[p.playerId] = {};
-              versions.current[p.playerId] = theirs.version;
-              setRows((r) => ({
-                ...r,
-                [p.playerId]: {
-                  ...r[p.playerId],
-                  version: theirs.version,
-                  entry: {
-                    ...r[p.playerId].entry,
-                    grossScore: theirs.grossScore,
-                    putts: theirs.putts,
-                    fairwayResult: theirs.fairwayResult as FairwayResult | null,
-                    gir: theirs.gir,
-                    penaltyStrokes: theirs.penaltyStrokes,
-                    obStrokes: theirs.obStrokes,
-                  },
-                  sync: { kind: "idle" },
-                },
-              }));
-              scheduleRefresh();
-            }}
+            onKeepTheirs={() => adoptTheirs(p.playerId, (row.sync as Extract<SyncState, { kind: "conflict" }>).theirs)}
             onKeepMine={() => {
               const theirs = (row.sync as Extract<SyncState, { kind: "conflict" }>).theirs;
               // Re-send the full current row on top of their version.
-              const e = row.entry;
-              pendingPatch.current[p.playerId] = {
-                grossScore: e.grossScore,
-                putts: e.putts,
-                fairwayResult: e.fairwayResult,
-                gir: e.gir,
-                penaltyStrokes: e.penaltyStrokes,
-                obStrokes: e.obStrokes,
-                sandAttempt: e.sandAttempt,
-                sandSave: e.sandSave,
-                upDownAttempt: e.upDownAttempt,
-                upDown: e.upDown,
-                driveDistance: e.driveDistance,
-              };
+              pendingPatch.current[p.playerId] = fullPatch(row.entry);
               versions.current[p.playerId] = theirs.version;
               setRows((r) => ({ ...r, [p.playerId]: { ...r[p.playerId], version: theirs.version } }));
               flush(p.playerId, theirs.version);
+            }}
+            onAskOrganizer={async () => {
+              const theirs = (row.sync as Extract<SyncState, { kind: "conflict" }>).theirs;
+              const r = await reportConflictAction({
+                roundId,
+                playerId: p.playerId,
+                holeNumber: hole.holeNumber,
+                mine: fullPatch(row.entry),
+                theirs: { grossScore: theirs.grossScore, putts: theirs.putts, fairwayResult: theirs.fairwayResult as FairwayResult | null, gir: theirs.gir, penaltyStrokes: theirs.penaltyStrokes, obStrokes: theirs.obStrokes },
+                theirsUpdatedBy: theirs.updatedBy,
+              });
+              if (r.ok) adoptTheirs(p.playerId, theirs);
+              else setRows((rs) => ({ ...rs, [p.playerId]: { ...rs[p.playerId], sync: { kind: "error", message: r.error } } }));
             }}
           />
         );
@@ -164,7 +237,23 @@ export function ScoreEntry({ roundId, hole, players, focusPlayerId }: { roundId:
   );
 }
 
-function PlayerRow({ player, par, row, onChange, onKeepTheirs, onKeepMine }: { player: ScoreEntryPlayer; par: number; row: RowState; onChange: (patch: Partial<HoleEntry>) => void; onKeepTheirs: () => void; onKeepMine: () => void }) {
+function fullPatch(e: HoleEntry): HoleScorePatch {
+  return {
+    grossScore: e.grossScore,
+    putts: e.putts,
+    fairwayResult: e.fairwayResult,
+    gir: e.gir,
+    penaltyStrokes: e.penaltyStrokes,
+    obStrokes: e.obStrokes,
+    sandAttempt: e.sandAttempt,
+    sandSave: e.sandSave,
+    upDownAttempt: e.upDownAttempt,
+    upDown: e.upDown,
+    driveDistance: e.driveDistance,
+  };
+}
+
+function PlayerRow({ player, par, row, onChange, onKeepTheirs, onKeepMine, onAskOrganizer }: { player: ScoreEntryPlayer; par: number; row: RowState; onChange: (patch: Partial<HoleEntry>) => void; onKeepTheirs: () => void; onKeepMine: () => void; onAskOrganizer: () => void }) {
   const [more, setMore] = useState(false);
   const e = row.entry;
   const disabled = !player.editable;
@@ -278,12 +367,15 @@ function PlayerRow({ player, par, row, onChange, onKeepTheirs, onKeepMine }: { p
           <p className="text-ink-2 mt-0.5">
             Theirs: {row.sync.theirs.grossScore ?? "–"} gross{row.sync.theirs.putts !== null ? `, ${row.sync.theirs.putts} putts` : ""}. Yours: {gross ?? "–"} gross{e.putts !== null ? `, ${e.putts} putts` : ""}.
           </p>
-          <div className="mt-2 grid grid-cols-2 gap-2">
+          <div className="mt-2 grid grid-cols-3 gap-2">
             <button type="button" className="btn btn-secondary !min-h-10 text-sm" onClick={onKeepTheirs}>
               Keep theirs
             </button>
             <button type="button" className="btn btn-primary !min-h-10 text-sm" onClick={onKeepMine}>
               Use mine
+            </button>
+            <button type="button" className="btn btn-ghost !min-h-10 text-sm" onClick={onAskOrganizer}>
+              Ask organizer
             </button>
           </div>
         </div>
@@ -299,6 +391,8 @@ function SyncBadge({ sync, editable }: { sync: SyncState; editable: boolean }) {
     idle: { text: "", cls: "" },
     saving: { text: "Saving…", cls: "text-muted" },
     saved: { text: "Synced", cls: "text-green" },
+    queued: { text: "Queued offline", cls: "text-gold" },
+    updated: { text: "Updated by another device", cls: "text-green" },
     error: { text: "Not saved", cls: "text-red" },
     conflict: { text: "Conflict", cls: "text-gold" },
   };

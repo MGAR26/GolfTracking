@@ -4,6 +4,7 @@ import { getDb, schema as s } from "@/db/client";
 import { calculateCourseHandicap, calculatePlayingHandicap } from "@/domain/handicap";
 import { getGameDefinition } from "@/domain/games";
 import { recordAudit } from "./audit";
+import { publishRoundChange } from "@/server/realtime/bus";
 import { loadRoundSnapshot } from "./roundProjection";
 
 const holeSchema = z.object({ holeNumber: z.number().int().min(1).max(18), par: z.number().int().min(3).max(6), yardage: z.number().int().min(50).max(800).nullable(), strokeIndex: z.number().int().min(1).max(18) });
@@ -202,6 +203,7 @@ export async function finishRound(roundId: string, actorId: string | null): Prom
     await tx.update(s.rounds).set({ status: "LOCKED", lockedAt: now }).where(eq(s.rounds.id, roundId));
     await recordAudit(tx as never, { actorId, entityType: "round", entityId: roundId, action: "LOCK", after: { games: snap.games.map((g) => ({ id: g.id, settlements: g.settlements })) } });
   });
+  publishRoundChange({ type: "round", roundId, status: "LOCKED", actorId, at: new Date().toISOString() });
 }
 
 /**
@@ -235,4 +237,5 @@ export async function reopenRound(roundId: string, actorId: string | null, reaso
     await tx.update(s.rounds).set({ status: "LIVE", lockedAt: null }).where(eq(s.rounds.id, roundId));
     await recordAudit(tx as never, { actorId, entityType: "round", entityId: roundId, action: "REOPEN", before: { status: "LOCKED" }, after: { status: "LIVE", reason, reversedEntries: entries.map((e) => e.id) } });
   });
+  publishRoundChange({ type: "round", roundId, status: "LIVE", actorId, at: new Date().toISOString() });
 }

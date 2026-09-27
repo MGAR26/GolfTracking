@@ -260,3 +260,26 @@ export const auditEvents = pgTable("audit_events", {
   afterJson: jsonb("after_json"),
   createdAt: createdAt(),
 });
+
+/** A reported edit conflict on one player's hole, for organizer reconciliation. */
+export const scoreConflicts = pgTable(
+  "score_conflicts",
+  {
+    id: id(),
+    roundId: text("round_id").notNull().references(() => rounds.id, { onDelete: "cascade" }),
+    playerId: text("player_id").notNull().references(() => playerProfiles.id),
+    holeNumber: integer("hole_number").notNull(),
+    reportedBy: text("reported_by").notNull(),
+    /** What the reporter tried to save. */
+    mineJson: jsonb("mine_json").notNull(),
+    /** What was on the server at the time (the accepted edit). */
+    theirsJson: jsonb("theirs_json").notNull(),
+    theirsUpdatedBy: text("theirs_updated_by"),
+    status: text("status").notNull().default("OPEN"), // OPEN | RESOLVED | DISMISSED
+    resolvedBy: text("resolved_by"),
+    resolution: text("resolution"), // MINE | THEIRS | DISMISSED
+    createdAt: createdAt(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => [index("score_conflicts_round_idx").on(t.roundId, t.status)],
+);

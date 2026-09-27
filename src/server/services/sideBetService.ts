@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb, schema as s } from "@/db/client";
 import { assertCanAccept, assertCanSettle, isFullyAccepted, settlementsForSideBet, SIDE_BET_PRESETS, type SideBet } from "@/domain/side-bets";
 import { recordAudit } from "./audit";
+import { publishRoundChange } from "@/server/realtime/bus";
 import { loadRoundSnapshot } from "./roundProjection";
 
 export const createSideBetSchema = z.object({
@@ -42,6 +43,7 @@ export async function createSideBet(input: CreateSideBetInput, creatorId: string
     ]);
     await recordAudit(tx as never, { actorId: creatorId, entityType: "side_bet", entityId: id, action: "PROPOSE", after: data });
   });
+  publishRoundChange({ type: "side_bet", roundId: data.roundId, sideBetId: id, actorId: creatorId, at: new Date().toISOString() });
   return id;
 }
 
@@ -65,6 +67,7 @@ export async function acceptSideBet(roundId: string, betId: string, actorId: str
     }
     await recordAudit(tx as never, { actorId, entityType: "side_bet", entityId: betId, action: "ACCEPT" });
   });
+  publishRoundChange({ type: "side_bet", roundId, sideBetId: betId, actorId, at: new Date().toISOString() });
 }
 
 export async function declineSideBet(roundId: string, betId: string, actorId: string): Promise<void> {
@@ -74,6 +77,7 @@ export async function declineSideBet(roundId: string, betId: string, actorId: st
   const db = await getDb();
   await db.update(s.sideBets).set({ status: bet.creatorId === actorId ? "CANCELLED" : "DECLINED" }).where(eq(s.sideBets.id, betId));
   await recordAudit(db, { actorId, entityType: "side_bet", entityId: betId, action: bet.creatorId === actorId ? "CANCEL" : "DECLINE" });
+  publishRoundChange({ type: "side_bet", roundId, sideBetId: betId, actorId, at: new Date().toISOString() });
 }
 
 /** Resolve with an explicit winner side (manual) or "AUTO" to use deterministic score data. */
@@ -117,4 +121,5 @@ export async function resolveSideBet(roundId: string, betId: string, winner: "A"
     }
     await recordAudit(tx as never, { actorId, entityType: "side_bet", entityId: betId, action: "RESOLVE", after: { result, mode: winner } });
   });
+  publishRoundChange({ type: "side_bet", roundId, sideBetId: betId, actorId, at: new Date().toISOString() });
 }

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getDb, schema as s } from "@/db/client";
 import { canEditScore, type ScoringMode, type TripRole } from "./permissions";
 import { recordAudit } from "./audit";
+import { publishRoundChange } from "@/server/realtime/bus";
 
 export const holeScorePatchSchema = z.object({
   grossScore: z.number().int().min(1).max(20).nullable().optional(),
@@ -57,7 +58,7 @@ export async function saveHoleScore(input: SaveScoreInput): Promise<SaveScoreRes
   });
   if (!allowed) return { status: "forbidden", reason: round.status !== "LIVE" ? "Round is locked" : "You cannot edit this player's score in this scoring mode" };
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [existing] = await tx
       .select()
       .from(s.holeScores)
@@ -114,6 +115,10 @@ export async function saveHoleScore(input: SaveScoreInput): Promise<SaveScoreRes
     }
     return { status: "saved", version: next.version } as const;
   });
+  if (result.status === "saved") {
+    publishRoundChange({ type: "score", roundId: input.roundId, playerId: input.playerId, holeNumber: input.holeNumber, version: result.version, actorId: input.actorId, at: new Date().toISOString() });
+  }
+  return result;
 }
 
 function stripUndefined<T extends object>(o: T): Partial<T> {
