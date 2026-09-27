@@ -1,10 +1,12 @@
 import { z } from "zod";
 import type { GameContext, GameDefinition, GameSettlement, HoleContext, LiveGameSummary } from "../types";
-import { holeScoreFor, playerName } from "../types";
+import { holeScoreFor, playerName, relativeStrokeContext } from "../types";
 import { applyHole, initialMatch, outcomeFromScores, sideBestScore, type MatchState } from "./core";
 
 export const matchPlayRulesSchema = z.object({
   basis: z.enum(["GROSS", "NET"]).default("NET"),
+  /** RELATIVE: lowest handicap plays off zero (match-play standard). FULL: every player takes all their strokes. */
+  handicapMode: z.enum(["RELATIVE", "FULL"]).default("RELATIVE"),
   /** Paid by the losing side to the winning side. 0 = bragging rights only. */
   amountCents: z.number().int().min(0).default(0),
   /** Player ids per side. Sides may have 1+ players (best ball). */
@@ -32,7 +34,8 @@ export const matchPlayGame: GameDefinition<MatchPlayRulesInput, MatchPlayState> 
     return { ok: true, errors: [] };
   },
   initialize(ctx, rules) {
-    return { rules: matchPlayRulesSchema.parse(rules), ctx, match: initialMatch(ctx.holes.length) };
+    const parsed = matchPlayRulesSchema.parse(rules);
+    return { rules: parsed, ctx: parsed.handicapMode === "RELATIVE" ? relativeStrokeContext(ctx) : ctx, match: initialMatch(ctx.holes.length) };
   },
   onHoleFinalized(hole: HoleContext, state) {
     const a = sideBestScore(state.rules.sideA.map((p) => holeScoreFor(state.ctx, hole, p, state.rules.basis)));

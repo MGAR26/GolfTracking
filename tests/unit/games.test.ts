@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { bestBallGame, matchPlayGame, nassauGame, runGame, skinsGame, stablefordGame, strokePlayGame } from "@/domain/games";
 import { computeNetBalances, balancesSum } from "@/domain/ledger";
-import { ctx, entriesFor, PAR_ROUND, player } from "./fixtures";
+import { course18, ctx, entriesFor, PAR_ROUND, player } from "./fixtures";
+import { allocateStrokes } from "@/domain/handicap";
 
 const par = () => [...PAR_ROUND];
 const withHole = (arr: number[], hole: number, score: number) => arr.map((s, i) => (i === hole - 1 ? score : s));
@@ -96,6 +97,32 @@ describe("match play", () => {
   });
   it("rejects a player on both sides", () => {
     expect(matchPlayGame.validateRules({ basis: "GROSS", amountCents: 0, sideA: ["a"], sideB: ["a"], }).ok).toBe(false);
+  });
+});
+
+describe("match play handicapping", () => {
+  // A: CH 7 (full strokes on SI 1-7). B: CH 14 (full strokes on SI 1-14).
+  // B bogeys the SI 1-7 holes; A bogeys the SI 8-14 holes; everything else is par.
+  const holes = course18();
+  const aScores = holes.map((h) => h.par + (h.strokeIndex >= 8 && h.strokeIndex <= 14 ? 1 : 0));
+  const bScores = holes.map((h) => h.par + (h.strokeIndex <= 7 ? 1 : 0));
+  it("RELATIVE (default): B gets 7 strokes on SI 1-7 only, so B's bogeys are halved and A's bogeys lose", () => {
+    const c = ctx([player("a", "A", 7), player("b", "B", 14)]);
+    const r = runGame(matchPlayGame, c, { basis: "NET", sideA: ["a"], sideB: ["b"] }, entriesFor({ a: aScores, b: bScores }));
+    expect(r.state.match.winner).toBe("B");
+    expect(r.state.ctx.players.find((p) => p.playerId === "a")!.allocation).toEqual(allocateStrokes(0, holes));
+    expect(r.state.ctx.players.find((p) => p.playerId === "b")!.allocation).toEqual(allocateStrokes(7, holes));
+  });
+  it("FULL: both take every stroke, which cancels out to a halved match", () => {
+    const c = ctx([player("a", "A", 7), player("b", "B", 14)]);
+    const r = runGame(matchPlayGame, c, { basis: "NET", handicapMode: "FULL", sideA: ["a"], sideB: ["b"] }, entriesFor({ a: aScores, b: bScores }));
+    expect(r.state.match.status).toBe("HALVED");
+  });
+  it("Nassau uses the same relative strokes", () => {
+    const c = ctx([player("a", "A", 7), player("b", "B", 14)]);
+    const r = runGame(nassauGame, c, { basis: "NET", amountCents: 500, sideA: ["a"], sideB: ["b"] }, entriesFor({ a: aScores, b: bScores }));
+    expect(r.state.overall.winner).toBe("B");
+    expect(r.settlements.every((st) => st.toPlayerId === "b")).toBe(true);
   });
 });
 

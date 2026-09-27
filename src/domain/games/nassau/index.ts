@@ -1,11 +1,13 @@
 import { z } from "zod";
 import type { GameContext, GameDefinition, GameSettlement, HoleContext, LiveGameSummary } from "../types";
-import { holeScoreFor, playerName } from "../types";
+import { holeScoreFor, playerName, relativeStrokeContext } from "../types";
 import { settleMatch } from "../match-play";
 import { applyHole, initialMatch, outcomeFromScores, sideBestScore, type MatchState } from "../match-play/core";
 
 export const nassauRulesSchema = z.object({
   basis: z.enum(["GROSS", "NET"]).default("NET"),
+  /** RELATIVE: lowest handicap plays off zero (match-play standard). FULL: every player takes all their strokes. */
+  handicapMode: z.enum(["RELATIVE", "FULL"]).default("RELATIVE"),
   /** Amount for each of front / back / overall. */
   amountCents: z.number().int().min(0).default(2000),
   sideA: z.array(z.string()).min(1),
@@ -38,9 +40,10 @@ export const nassauGame: GameDefinition<NassauRulesInput, NassauState> = {
   initialize(ctx, rules) {
     const sorted = [...ctx.holes].sort((a, b) => a.holeNumber - b.holeNumber);
     const half = Math.ceil(sorted.length / 2);
+    const parsed = nassauRulesSchema.parse(rules);
     return {
-      rules: nassauRulesSchema.parse(rules),
-      ctx,
+      rules: parsed,
+      ctx: parsed.handicapMode === "RELATIVE" ? relativeStrokeContext(ctx) : ctx,
       front: initialMatch(half),
       back: initialMatch(sorted.length - half),
       overall: initialMatch(sorted.length),

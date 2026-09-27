@@ -1,4 +1,5 @@
 import type { HoleEntry, HoleInfo, PlayerId, RoundPlayerInfo, ScoringBasis } from "../types";
+import { allocateStrokes, totalAllocated } from "../handicap/strokeAllocation";
 
 export interface GameTeamInfo {
   teamId: string;
@@ -138,4 +139,18 @@ export function splitCents(total: number, parts: number): number[] {
 
 export function playerName(ctx: GameContext, playerId: PlayerId): string {
   return ctx.players.find((p) => p.playerId === playerId)?.displayName ?? playerId;
+}
+
+/**
+ * Head-to-head handicapping: the lowest-handicap participant plays off zero and everyone
+ * else receives the difference, allocated by stroke index. Used by Match Play and Nassau.
+ */
+export function relativeStrokeContext(ctx: GameContext): GameContext {
+  if (ctx.players.length === 0) return ctx;
+  const strokes = ctx.players.map((p) => totalAllocated(p.allocation));
+  const min = Math.min(...strokes);
+  return {
+    ...ctx,
+    players: ctx.players.map((p, i) => ({ ...p, allocation: allocateStrokes(strokes[i] - min, ctx.holes) })),
+  };
 }
