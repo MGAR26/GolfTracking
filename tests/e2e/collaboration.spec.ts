@@ -43,6 +43,8 @@ test("concurrent edits of the same hole surface a conflict and the organizer rec
   await ensureDemoTrip(page);
   const matt = await phoneFor(browser, "player_matt"); // owner: can edit anyone
   const john = await phoneFor(browser, "player_john"); // player: edits own row
+  // Matt's phone has lost its live stream (otherwise it would adopt John's save before Matt taps).
+  await matt.context().route("**/api/rounds/*/events", (route) => route.abort());
 
   // Both open John's row on hole 5 with the same base version.
   await matt.goto("/rounds/round_pinehurst_r1/score?hole=5");
