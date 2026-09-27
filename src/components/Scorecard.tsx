@@ -58,11 +58,11 @@ function Nine({ snap, holes, label, editable, showNet }: { snap: RoundSnapshot; 
                 const cell = (
                   <span className="relative inline-flex flex-col items-center justify-center w-8 h-9">
                     <span className={`inline-flex items-center justify-center w-7 h-7 font-semibold ${scoreClass(line.grossToPar)}`}>{line.gross ?? ""}</span>
-                    {showNet && line.net !== null && line.strokesReceived !== 0 && <span className="text-[9px] leading-none text-green-ink -mt-0.5">{line.net}</span>}
+                    {showNet && line.net !== null && line.strokesReceived !== 0 && <span className="text-[9px] leading-none text-ink -mt-0.5">{line.net}</span>}
                     {line.strokesReceived > 0 && (
                       <span className="absolute top-0 right-0 flex gap-px">
                         {Array.from({ length: Math.min(line.strokesReceived, 2) }).map((_, i) => (
-                          <span key={i} className="block h-1 w-1 rounded-full bg-green" />
+                          <span key={i} className="block h-1 w-1 rounded-full bg-accent" />
                         ))}
                       </span>
                     )}
@@ -82,7 +82,7 @@ function Nine({ snap, holes, label, editable, showNet }: { snap: RoundSnapshot; 
               })}
               <td className="text-center font-semibold py-1.5">
                 {t[segKey].holesPlayed ? t[segKey].gross : ""}
-                {showNet && t[segKey].holesPlayed ? <span className="block text-[10px] text-green-ink">{t[segKey].net}</span> : null}
+                {showNet && t[segKey].holesPlayed ? <span className="block text-[10px] text-ink">{t[segKey].net}</span> : null}
               </td>
             </tr>
           );
@@ -124,7 +124,7 @@ export function Scorecard({ snap, showNet = true }: { snap: RoundSnapshot; showN
                   <td className="py-1.5 font-medium">{p.displayName}</td>
                   <td className="py-1.5 text-right font-semibold">{t.holesPlayed ? t.total.gross : "–"}</td>
                   <td className="py-1.5 text-right text-ink-2">{t.strokesReceived}</td>
-                  <td className="py-1.5 text-right font-semibold text-green-ink">{t.holesPlayed ? t.total.net : "–"}</td>
+                  <td className="py-1.5 text-right font-semibold text-ink">{t.holesPlayed ? t.total.net : "–"}</td>
                 </tr>
               );
             })}

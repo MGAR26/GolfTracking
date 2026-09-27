@@ -151,7 +151,7 @@ export function NewRoundForm({ tripId, tees, players }: { tripId: string; tees: 
               </label>
             </div>
             <details>
-              <summary className="text-sm font-semibold text-green cursor-pointer">Holes (par {holes.reduce((a, h) => a + (Number(h.par) || 0), 0)}) — edit par, yardage, stroke index</summary>
+              <summary className="text-sm font-semibold text-accent cursor-pointer">Holes (par {holes.reduce((a, h) => a + (Number(h.par) || 0), 0)}) — edit par, yardage, stroke index</summary>
               <div className="mt-2 grid grid-cols-[2rem_1fr_1fr_1fr] gap-1 text-xs items-center">
                 <span className="text-muted">#</span><span className="text-muted">Par</span><span className="text-muted">Yds</span><span className="text-muted">SI</span>
                 {holes.map((h, i) => (
@@ -180,7 +180,7 @@ export function NewRoundForm({ tripId, tees, players }: { tripId: string; tees: 
           const on = selected.includes(p.playerId);
           const ch = preview?.find((x) => x.playerId === p.playerId)?.ch;
           return (
-            <button key={p.playerId} type="button" aria-pressed={on} onClick={() => toggle(p.playerId)} className={`tap flex items-center justify-between rounded-xl border px-3 text-left ${on ? "border-green bg-green-soft/60" : "border-line"}`}>
+            <button key={p.playerId} type="button" aria-pressed={on} onClick={() => toggle(p.playerId)} className={`tap flex items-center justify-between rounded-xl border px-3 text-left ${on ? "border-accent bg-tint/60" : "border-line"}`}>
               <span className="font-medium">{p.displayName}</span>
               <span className="text-xs text-ink-2">HI {p.handicapIndex.toFixed(1)}{on && ch !== undefined ? ` → CH ${ch}` : ""}</span>
             </button>
@@ -192,7 +192,7 @@ export function NewRoundForm({ tripId, tees, players }: { tripId: string; tees: 
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-2">Format</h2>
         <label className="flex items-center justify-between tap">
           <span className="font-medium">Counts toward trip standings</span>
-          <input type="checkbox" className="h-6 w-6 accent-[var(--green)]" checked={counts} onChange={(e) => setCounts(e.target.checked)} />
+          <input type="checkbox" className="h-6 w-6 accent-[var(--accent)]" checked={counts} onChange={(e) => setCounts(e.target.checked)} />
         </label>
         <div>
           <span className="label">Scoring mode</span>
@@ -228,7 +228,7 @@ export function NewRoundForm({ tripId, tees, players }: { tripId: string; tees: 
           <Money label="Skin value ($, from each other player)" value={games.skins.value} onChange={(value) => setGames((g) => ({ ...g, skins: { ...g.skins, value } }))} />
           <label className="flex items-center justify-between tap text-sm">
             <span>Carryovers</span>
-            <input type="checkbox" className="h-5 w-5 accent-[var(--green)]" checked={games.skins.carryover} onChange={(e) => setGames((g) => ({ ...g, skins: { ...g.skins, carryover: e.target.checked } }))} />
+            <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={games.skins.carryover} onChange={(e) => setGames((g) => ({ ...g, skins: { ...g.skins, carryover: e.target.checked } }))} />
           </label>
         </GameToggle>
         <GameToggle label="Nassau" on={games.nassau.on} onToggle={() => setGames((g) => ({ ...g, nassau: { ...g.nassau, on: !g.nassau.on } }))}>
@@ -252,7 +252,7 @@ export function NewRoundForm({ tripId, tees, players }: { tripId: string; tees: 
         </GameToggle>
       </section>
 
-      {error && <p className="text-sm text-red">{error}</p>}
+      {error && <p className="text-sm text-neg">{error}</p>}
       <button type="submit" className="btn btn-primary w-full" disabled={pending || selected.length === 0}>
         {pending ? "Starting…" : "Start round"}
       </button>
@@ -273,10 +273,10 @@ function HoleRow({ i, h, onChange }: { i: number; h: { par: string; yardage: str
 
 function GameToggle({ label, on, onToggle, children }: { label: string; on: boolean; onToggle: () => void; children: React.ReactNode }) {
   return (
-    <div className={`rounded-xl border p-3 ${on ? "border-green" : "border-line"}`}>
+    <div className={`rounded-xl border p-3 ${on ? "border-accent" : "border-line"}`}>
       <label className="flex items-center justify-between tap">
         <span className="font-medium">{label}</span>
-        <input type="checkbox" className="h-6 w-6 accent-[var(--green)]" checked={on} onChange={onToggle} />
+        <input type="checkbox" className="h-6 w-6 accent-[var(--accent)]" checked={on} onChange={onToggle} />
       </label>
       {on && <div className="mt-2 flex flex-col gap-2">{children}</div>}
     </div>

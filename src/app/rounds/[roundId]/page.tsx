@@ -40,14 +40,14 @@ export default async function RoundOverviewPage({ params }: { params: Promise<{ 
         />
       )}
       {live && hole ? (
-        <Card className="!bg-green !border-green text-white">
+        <Card className="!bg-ink !border-ink !border-t-brass text-[var(--bg)]">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs uppercase tracking-wide opacity-80">Now playing</p>
               <h2 className="font-display text-2xl mt-0.5">Hole {hole.holeNumber}</h2>
               <p className="text-sm opacity-90">Par {hole.par}{hole.yardage ? ` · ${hole.yardage} yds` : ""} · SI {hole.strokeIndex}</p>
             </div>
-            <Link href={`/rounds/${roundId}/score?hole=${hole.holeNumber}`} className="btn btn-secondary !text-green-ink">Score</Link>
+            <Link href={`/rounds/${roundId}/score?hole=${hole.holeNumber}`} className="btn btn-secondary !text-ink">Score</Link>
           </div>
           {snap.nowNotes.length > 0 && (
             <ul className="mt-3 text-sm space-y-1 border-t border-white/20 pt-2">
@@ -58,10 +58,10 @@ export default async function RoundOverviewPage({ params }: { params: Promise<{ 
           )}
         </Card>
       ) : live ? (
-        <Card className="!bg-green !border-green text-white">
+        <Card className="!bg-ink !border-ink !border-t-brass text-[var(--bg)]">
           <p className="font-display text-xl">All 18 holes scored</p>
           <p className="text-sm opacity-90 mt-1">Review the card, resolve any bets, then finish the round to lock it and post results.</p>
-          <Link href={`/rounds/${roundId}/finish`} className="btn btn-secondary w-full mt-3 !text-green-ink">Finish round</Link>
+          <Link href={`/rounds/${roundId}/finish`} className="btn btn-secondary w-full mt-3 !text-ink">Finish round</Link>
         </Card>
       ) : (
         <Card>
@@ -82,7 +82,7 @@ export default async function RoundOverviewPage({ params }: { params: Promise<{ 
       )}
 
       {me && myTotals && (
-        <Card title={`${me.displayName} · CH ${me.courseHandicap}`} action={<Link href={`/rounds/${roundId}/stats`} className="text-xs font-semibold text-green">Stats ›</Link>}>
+        <Card title={`${me.displayName} · CH ${me.courseHandicap}`} action={<Link href={`/rounds/${roundId}/stats`} className="text-xs font-semibold text-accent">Stats ›</Link>}>
           <div className="grid grid-cols-4 gap-2 text-center">
             <Stat label="Gross" value={myTotals.holesPlayed ? String(myTotals.total.gross) : "–"} sub={myTotals.holesPlayed ? <ToPar value={myTotals.total.grossToPar} /> : null} />
             <Stat label="Net" value={myTotals.holesPlayed ? String(myTotals.total.net) : "–"} sub={myTotals.holesPlayed ? <ToPar value={myTotals.total.netToPar} /> : null} />
@@ -92,11 +92,11 @@ export default async function RoundOverviewPage({ params }: { params: Promise<{ 
         </Card>
       )}
 
-      <Card title="Leaderboard" action={<Link href={`/rounds/${roundId}/scorecard`} className="text-xs font-semibold text-green">Scorecard ›</Link>}>
+      <Card title="Leaderboard" action={<Link href={`/rounds/${roundId}/scorecard`} className="text-xs font-semibold text-accent">Scorecard ›</Link>}>
         <Leaderboard rows={snap.leaderboardNet} basis="NET" highlightId={actor?.playerId} />
       </Card>
 
-      <Card title="Games" action={<Link href={`/rounds/${roundId}/games`} className="text-xs font-semibold text-green">All ›</Link>}>
+      <Card title="Games" action={<Link href={`/rounds/${roundId}/games`} className="text-xs font-semibold text-accent">All ›</Link>}>
         {snap.games.length === 0 ? (
           <p className="text-sm text-muted">No games configured.</p>
         ) : (
@@ -116,7 +116,7 @@ export default async function RoundOverviewPage({ params }: { params: Promise<{ 
         )}
       </Card>
 
-      <Card title="Money position" action={snap.round.tripId ? <Link href={`/trips/${snap.round.tripId}/money`} className="text-xs font-semibold text-green">Trip ledger ›</Link> : undefined}>
+      <Card title="Money position" action={snap.round.tripId ? <Link href={`/trips/${snap.round.tripId}/money`} className="text-xs font-semibold text-accent">Trip ledger ›</Link> : undefined}>
         {roundLedger.length === 0 ? (
           <p className="text-sm text-muted">{live ? "Projected from live games; nothing is posted until the round is locked." : "No money posted for this round."}</p>
         ) : null}
@@ -127,7 +127,7 @@ export default async function RoundOverviewPage({ params }: { params: Promise<{ 
             return (
               <li key={p.playerId} className="flex items-center justify-between rounded-lg bg-surface-2/60 px-3 py-2">
                 <span className="font-medium">{p.displayName}</span>
-                <span className={`font-semibold ${v > 0 ? "text-green-ink" : v < 0 ? "text-red" : "text-muted"}`}>{money(v, { sign: true })}</span>
+                <span className={`font-semibold ${v > 0 ? "text-ink" : v < 0 ? "text-neg" : "text-muted"}`}>{money(v, { sign: true })}</span>
               </li>
             );
           })}

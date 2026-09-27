@@ -22,7 +22,7 @@ export default async function MoneyPage({ params }: { params: Promise<{ tripId: 
             {d.standings.map((s) => (
               <li key={s.playerId} className="flex items-center justify-between py-2">
                 <span className="font-medium">{s.displayName}</span>
-                <span className={`font-semibold ${s.moneyCents > 0 ? "text-green-ink" : s.moneyCents < 0 ? "text-red" : "text-muted"}`}>{money(s.moneyCents, { sign: true })}</span>
+                <span className={`font-semibold ${s.moneyCents > 0 ? "text-ink" : s.moneyCents < 0 ? "text-neg" : "text-muted"}`}>{money(s.moneyCents, { sign: true })}</span>
               </li>
             ))}
           </ul>

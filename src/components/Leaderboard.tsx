@@ -16,7 +16,7 @@ export function Leaderboard({ rows, basis, compact = false, highlightId }: { row
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.playerId} className={`border-t border-line ${r.playerId === highlightId ? "bg-green-soft/50" : ""}`}>
+          <tr key={r.playerId} className={`border-t border-line ${r.playerId === highlightId ? "bg-tint/50" : ""}`}>
             <td className="py-2 font-semibold text-ink-2">{r.holesPlayed === 0 ? "–" : `${r.tied ? "T" : ""}${r.position}`}</td>
             <td className="py-2 font-medium">{r.displayName}</td>
             <td className="py-2 text-right text-ink-2">{r.holesPlayed === 0 ? "–" : r.holesPlayed === 18 ? "F" : r.holesPlayed}</td>

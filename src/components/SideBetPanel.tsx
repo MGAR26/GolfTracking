@@ -23,7 +23,7 @@ export function SideBetList({ roundId, bets, players, actorId, canOrganize, live
   if (bets.length === 0) return <p className="text-sm text-muted">No side bets yet.</p>;
   return (
     <ul className="flex flex-col gap-2">
-      {error && <li className="text-sm text-red">{error}</li>}
+      {error && <li className="text-sm text-neg">{error}</li>}
       {bets.map((b) => {
         const sideA = b.participants.filter((p) => p.side === "A");
         const sideB = b.participants.filter((p) => p.side === "B");
@@ -154,7 +154,7 @@ export function NewSideBetForm({ roundId, players, actorId, defaultHole }: { rou
           {opponentsAvailable.map((p) => {
             const on = opponents.includes(p.playerId);
             return (
-              <button key={p.playerId} type="button" aria-pressed={on} onClick={() => setOpponents((o) => (on ? o.filter((x) => x !== p.playerId) : [...o, p.playerId]))} className={`tap rounded-full px-4 text-sm font-semibold border ${on ? "bg-green text-white border-green" : "bg-surface border-line-strong"}`}>
+              <button key={p.playerId} type="button" aria-pressed={on} onClick={() => setOpponents((o) => (on ? o.filter((x) => x !== p.playerId) : [...o, p.playerId]))} className={`tap rounded-full px-4 text-sm font-semibold border ${on ? "bg-accent text-white border-accent" : "bg-surface border-line-strong"}`}>
                 {p.displayName}
               </button>
             );
@@ -185,7 +185,7 @@ export function NewSideBetForm({ roundId, players, actorId, defaultHole }: { rou
         <input className="field" placeholder={finalDescription} value={description} onChange={(e) => setDescription(e.target.value)} />
       </label>
       <p className="text-xs text-muted">Extra — separate from existing games. Terms lock once every opponent accepts.</p>
-      {error && <p className="text-sm text-red">{error}</p>}
+      {error && <p className="text-sm text-neg">{error}</p>}
       <div className="grid grid-cols-2 gap-2">
         <button type="button" className="btn btn-secondary" onClick={() => setOpen(false)}>Cancel</button>
         <button type="submit" className="btn btn-primary" disabled={pending || opponents.length === 0}>Send bet</button>

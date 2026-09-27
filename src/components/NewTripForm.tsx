@@ -63,7 +63,7 @@ export function NewTripForm() {
       <section className="card p-4 flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-2">Players & Handicap Index</h2>
-          <button type="button" className="text-sm font-semibold text-green tap !min-h-9" onClick={() => setPlayers((p) => [...p, { name: "", hi: "" }])}>
+          <button type="button" className="text-sm font-semibold text-accent tap !min-h-9" onClick={() => setPlayers((p) => [...p, { name: "", hi: "" }])}>
             + Add
           </button>
         </div>
@@ -79,7 +79,7 @@ export function NewTripForm() {
         ))}
       </section>
 
-      {error && <p className="text-sm text-red">{error}</p>}
+      {error && <p className="text-sm text-neg">{error}</p>}
       <button type="submit" className="btn btn-primary w-full" disabled={pending}>
         {pending ? "Creating…" : "Create trip"}
       </button>

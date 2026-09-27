@@ -14,7 +14,7 @@ export default async function ScorecardPage({ params }: { params: Promise<{ roun
     <Page>
       <div className="flex items-center justify-between">
         <h2 className="font-display text-xl">Scorecard</h2>
-        <Link href={`/rounds/${roundId}/score`} className="text-sm font-semibold text-green">Hole entry ›</Link>
+        <Link href={`/rounds/${roundId}/score`} className="text-sm font-semibold text-accent">Hole entry ›</Link>
       </div>
       <Scorecard snap={snap} />
     </Page>

@@ -22,7 +22,7 @@ export default async function TripPage({ params }: { params: Promise<{ tripId: s
       <AppHeader title={d.trip.name} back="/" subtitle={[d.trip.destination, formatDateRange(d.trip.startDate, d.trip.endDate)].filter(Boolean).join(" · ")} />
       <Page>
         {primaryRound ? (
-          <Card className="!bg-green !border-green text-white">
+          <Card className="!bg-ink !border-ink !border-t-brass text-[var(--bg)]">
             <p className="text-xs uppercase tracking-wide opacity-80">{primaryRound.status === "LIVE" ? "Live now" : "Up next"}</p>
             <h2 className="font-display text-2xl mt-1">{primaryRound.name ?? d.rounds.find((r) => r.id === primaryRound.id)?.courseName}</h2>
             <p className="text-sm opacity-90">
@@ -30,7 +30,7 @@ export default async function TripPage({ params }: { params: Promise<{ tripId: s
               {primaryRound.startsAt ? ` · ${formatTime(primaryRound.startsAt)}` : ""}
               {!primaryRound.countsTowardTrip ? " · standalone" : ""}
             </p>
-            <Link href={`/rounds/${primaryRound.id}/score`} className="btn btn-secondary w-full mt-3 !text-green-ink">
+            <Link href={`/rounds/${primaryRound.id}/score`} className="btn btn-secondary w-full mt-3 !text-ink">
               {primaryRound.status === "LIVE" ? "Continue scoring" : "Start today's round"}
             </Link>
           </Card>
@@ -51,7 +51,7 @@ export default async function TripPage({ params }: { params: Promise<{ tripId: s
             </thead>
             <tbody>
               {d.standings.map((s, i) => (
-                <tr key={s.playerId} className={`border-t border-line ${s.playerId === actor?.playerId ? "bg-green-soft/50" : ""}`}>
+                <tr key={s.playerId} className={`border-t border-line ${s.playerId === actor?.playerId ? "bg-tint/50" : ""}`}>
                   <td className="py-2 font-medium">
                     <span className="text-muted mr-2">{s.roundsCounted ? i + 1 : "–"}</span>
                     {s.displayName}
@@ -59,7 +59,7 @@ export default async function TripPage({ params }: { params: Promise<{ tripId: s
                   <td className="py-2 text-right text-ink-2">{s.roundsCounted}</td>
                   <td className="py-2 text-right">{s.roundsCounted ? <><span className="font-semibold">{s.totalGross}</span> <ToPar value={s.grossToPar} className="text-xs" /></> : "–"}</td>
                   <td className="py-2 text-right">{s.roundsCounted ? <><span className="font-semibold">{s.totalNet}</span> <ToPar value={s.netToPar} className="text-xs" /></> : "–"}</td>
-                  <td className={`py-2 text-right font-semibold ${s.moneyCents > 0 ? "text-green-ink" : s.moneyCents < 0 ? "text-red" : "text-muted"}`}>{money(s.moneyCents, { sign: true })}</td>
+                  <td className={`py-2 text-right font-semibold ${s.moneyCents > 0 ? "text-ink" : s.moneyCents < 0 ? "text-neg" : "text-muted"}`}>{money(s.moneyCents, { sign: true })}</td>
                 </tr>
               ))}
             </tbody>
@@ -67,7 +67,7 @@ export default async function TripPage({ params }: { params: Promise<{ tripId: s
           {me && (
             <p className="text-xs text-muted mt-2">
               You are {me.moneyCents === 0 ? "even" : me.moneyCents > 0 ? `up ${money(me.moneyCents)}` : `down ${money(-me.moneyCents)}`} ·{" "}
-              <Link href={`/trips/${tripId}/money`} className="text-green font-semibold">Money & settlement</Link>
+              <Link href={`/trips/${tripId}/money`} className="text-accent font-semibold">Money & settlement</Link>
             </p>
           )}
         </Card>
@@ -79,12 +79,12 @@ export default async function TripPage({ params }: { params: Promise<{ tripId: s
                 <p className="font-medium">{lastRecap.name}</p>
                 <p className="text-xs text-muted">{lastRecap.leader ? `${lastRecap.leader} led on net` : "Locked"}{lastRecap.countsTowardTrip ? "" : " · standalone"}</p>
               </div>
-              <span className="text-green text-sm font-semibold">Recap ›</span>
+              <span className="text-accent text-sm font-semibold">Recap ›</span>
             </Link>
           </Card>
         )}
 
-        <Card title="Rounds" action={<Link href={`/trips/${tripId}/rounds/new`} className="text-sm font-semibold text-green">+ Add</Link>}>
+        <Card title="Rounds" action={<Link href={`/trips/${tripId}/rounds/new`} className="text-sm font-semibold text-accent">+ Add</Link>}>
           {d.rounds.length === 0 ? (
             <p className="text-sm text-muted">No rounds yet. Add the first one to snapshot handicaps and pick games.</p>
           ) : (

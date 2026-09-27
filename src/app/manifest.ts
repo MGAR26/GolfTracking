@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Scoring, handicaps, games, side bets and settlement for golf trips.",
     start_url: "/",
     display: "standalone",
-    background_color: "#f3efe6",
-    theme_color: "#1f5a3c",
+    background_color: "#f7f3ea",
+    theme_color: "#1b2a41",
     icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml" }],
   };
 }

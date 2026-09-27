@@ -29,9 +29,9 @@ export function ConflictPanel({ roundId, conflicts }: { roundId: string; conflic
       if (!r.ok) setError(r.error);
     });
   return (
-    <section className="card p-4 !border-gold" data-testid="conflict-panel">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-gold mb-2">Conflicts to reconcile ({conflicts.length})</h2>
-      {error && <p className="text-sm text-red mb-2">{error}</p>}
+    <section className="card p-4 !border-brass" data-testid="conflict-panel">
+      <h2 className="text-sm font-semibold uppercase tracking-wide text-brass mb-2">Conflicts to reconcile ({conflicts.length})</h2>
+      {error && <p className="text-sm text-neg mb-2">{error}</p>}
       <ul className="divide-y divide-line">
         {conflicts.map((c) => (
           <li key={c.id} className="py-3">

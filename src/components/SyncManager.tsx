@@ -78,11 +78,11 @@ export function SyncManager() {
 
   return (
     <div className="fixed left-1/2 -translate-x-1/2 z-30 max-w-[calc(100%-2rem)]" style={{ top: "calc(3.5rem + 8px)" }} role="status" data-testid="sync-status">
-      <div className={`card px-3 py-2 text-xs font-semibold flex items-center gap-2 ${conflicts.length || errors.length ? "!border-gold" : ""}`}>
-        <span className={`inline-block h-2 w-2 rounded-full ${!online ? "bg-red" : pending ? "bg-gold" : "bg-green"}`} />
+      <div className={`card px-3 py-2 text-xs font-semibold flex items-center gap-2 ${conflicts.length || errors.length ? "!border-brass" : ""}`}>
+        <span className={`inline-block h-2 w-2 rounded-full ${!online ? "bg-neg" : pending ? "bg-brass" : "bg-accent"}`} />
         {!online ? `Offline · ${pending} change${pending === 1 ? "" : "s"} queued` : pending ? `Syncing ${pending} change${pending === 1 ? "" : "s"}…` : conflicts.length ? conflicts[0].message : errors[0]?.message}
         {(conflicts.length > 0 || errors.length > 0) && (
-          <button type="button" className="text-green underline" onClick={() => [...conflicts, ...errors].forEach((c) => offlineQueue.remove(c.id))}>
+          <button type="button" className="text-accent underline" onClick={() => [...conflicts, ...errors].forEach((c) => offlineQueue.remove(c.id))}>
             Dismiss
           </button>
         )}

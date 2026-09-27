@@ -24,7 +24,7 @@ export function RoundTabs({ roundId }: { roundId: string }) {
               <Link
                 href={href}
                 aria-current={active ? "page" : undefined}
-                className={`tap flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold ${active ? "text-green-ink" : "text-muted"}`}
+                className={`tap flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold ${active ? "text-ink" : "text-muted"}`}
               >
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={active ? 2.4 : 1.8} strokeLinecap="round" strokeLinejoin="round">
                   <path d={t.icon} />

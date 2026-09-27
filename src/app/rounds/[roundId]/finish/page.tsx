@@ -23,7 +23,7 @@ export default async function FinishPage({ params }: { params: Promise<{ roundId
         <Card title="Before you can lock">
           <ul className="text-sm space-y-1.5">
             {check.problems.map((p, i) => (
-              <li key={i} className="flex gap-2 text-red"><span aria-hidden>•</span>{p}</li>
+              <li key={i} className="flex gap-2 text-neg"><span aria-hidden>•</span>{p}</li>
             ))}
           </ul>
           <div className="grid grid-cols-2 gap-2 mt-3">

@@ -52,7 +52,7 @@ export default async function ScorePage({ params, searchParams }: { params: Prom
 
       {snap.round.status !== "LIVE" && <p className="text-sm text-muted text-center">This round is locked. Scores are read-only.</p>}
       {snap.round.status === "LIVE" && players.every((p) => !p.editable) && (
-        <p className="text-sm text-gold text-center">You can&apos;t enter scores for this group in {snap.round.scoringMode.toLowerCase().replace("_", " ")} mode. Switch player at the top to test.</p>
+        <p className="text-sm text-brass text-center">You can&apos;t enter scores for this group in {snap.round.scoringMode.toLowerCase().replace("_", " ")} mode. Switch player at the top to test.</p>
       )}
 
       <ScoreEntry key={holeNumber} roundId={roundId} hole={{ holeNumber: hole.holeNumber, par: hole.par }} players={players} focusPlayerId={sp.player} />
@@ -82,7 +82,7 @@ export default async function ScorePage({ params, searchParams }: { params: Prom
 function NavLink({ href, label, children }: { href: string | null; label: string; children: React.ReactNode }) {
   if (!href) return <span className="tap inline-flex items-center justify-center text-line-strong text-2xl" aria-hidden>{children}</span>;
   return (
-    <Link href={href} aria-label={label} className="tap inline-flex items-center justify-center rounded-xl bg-surface-2 text-2xl font-semibold text-green-ink">
+    <Link href={href} aria-label={label} className="tap inline-flex items-center justify-center rounded-xl bg-surface-2 text-2xl font-semibold text-ink">
       {children}
     </Link>
   );

@@ -24,13 +24,13 @@ export function GameCard({ game, playerNames }: { game: ProjectedGame; playerNam
         {game.summary.lines.map((l, i) => (
           <li key={i} className="flex items-center justify-between py-1.5 text-sm">
             <span className="text-ink-2">{l.label}</span>
-            <span className={`font-semibold ${l.emphasis === "positive" ? "text-green-ink" : l.emphasis === "negative" ? "text-red" : ""}`}>{l.value}</span>
+            <span className={`font-semibold ${l.emphasis === "positive" ? "text-ink" : l.emphasis === "negative" ? "text-neg" : ""}`}>{l.value}</span>
           </li>
         ))}
       </ul>
       {game.settlements.length > 0 && (
         <details className="mt-3">
-          <summary className="text-xs font-semibold text-green cursor-pointer">Settlement ({game.settlements.length})</summary>
+          <summary className="text-xs font-semibold text-accent cursor-pointer">Settlement ({game.settlements.length})</summary>
           <ul className="mt-1 text-xs text-ink-2 space-y-0.5">
             {game.settlements.map((st, i) => (
               <li key={i}>

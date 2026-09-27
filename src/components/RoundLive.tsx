@@ -57,7 +57,7 @@ export function RoundLive({ roundId, actorId }: { roundId: string; actorId: stri
 
   return (
     <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted" aria-live="polite" data-testid="live-status" data-state={state}>
-      <span className={`inline-block h-1.5 w-1.5 rounded-full ${state === "live" ? "bg-green" : state === "offline" ? "bg-red" : "bg-line-strong"}`} />
+      <span className={`inline-block h-1.5 w-1.5 rounded-full ${state === "live" ? "bg-accent" : state === "offline" ? "bg-neg" : "bg-line-strong"}`} />
       {state === "live" ? "Live" : state === "offline" ? "Reconnecting" : "Connecting"}
     </span>
   );

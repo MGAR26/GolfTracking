@@ -22,16 +22,16 @@ export function Card({ children, className = "", title, action }: { children: Re
 export function Pill({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "green" | "gold" | "red" }) {
   const cls = {
     neutral: "bg-surface-2 text-ink-2",
-    green: "bg-green-soft text-green-ink",
-    gold: "bg-gold-soft text-gold",
-    red: "bg-red-soft text-red",
+    green: "bg-tint text-ink",
+    gold: "bg-brass-soft text-brass",
+    red: "bg-neg-soft text-neg",
   }[tone];
   return <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${cls}`}>{children}</span>;
 }
 
 export function ToPar({ value, className = "" }: { value: number; className?: string }) {
   const text = value === 0 ? "E" : value > 0 ? `+${value}` : `${value}`;
-  const tone = value < 0 ? "text-red" : value === 0 ? "text-green-ink" : "text-ink";
+  const tone = value < 0 ? "text-neg" : value === 0 ? "text-ink" : "text-ink";
   return <span className={`${tone} ${className}`}>{text}</span>;
 }
 
@@ -59,7 +59,7 @@ export function StrokeDots({ n }: { n: number }) {
   return (
     <span className="inline-flex gap-0.5 align-middle ml-1" title={`${n > 0 ? "receives" : "gives"} ${Math.abs(n)} stroke${Math.abs(n) === 1 ? "" : "s"}`}>
       {Array.from({ length: abs }).map((_, i) => (
-        <span key={i} className={`inline-block h-1.5 w-1.5 rounded-full ${n > 0 ? "bg-green" : "bg-red"}`} />
+        <span key={i} className={`inline-block h-1.5 w-1.5 rounded-full ${n > 0 ? "bg-accent" : "bg-neg"}`} />
       ))}
     </span>
   );
@@ -74,7 +74,7 @@ export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
     .toUpperCase();
   return (
     <span
-      className="inline-flex items-center justify-center rounded-full bg-green-soft text-green-ink font-semibold shrink-0"
+      className="inline-flex items-center justify-center rounded-full bg-tint text-ink font-semibold shrink-0"
       style={{ width: size, height: size, fontSize: size * 0.4 }}
     >
       {initials}

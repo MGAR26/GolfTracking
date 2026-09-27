@@ -349,7 +349,7 @@ function PlayerRow({ player, par, row, onChange, onKeepTheirs, onKeepMine, onAsk
         </div>
       </div>
 
-      <button type="button" className="mt-2 text-xs font-semibold text-green tap !min-h-9" onClick={() => setMore((m) => !m)} aria-expanded={more}>
+      <button type="button" className="mt-2 text-xs font-semibold text-accent tap !min-h-9" onClick={() => setMore((m) => !m)} aria-expanded={more}>
         {more ? "Less" : "More stats"}
       </button>
       {more && (
@@ -362,8 +362,8 @@ function PlayerRow({ player, par, row, onChange, onKeepTheirs, onKeepMine, onAsk
       )}
 
       {row.sync.kind === "conflict" && (
-        <div className="mt-3 rounded-xl bg-gold-soft p-3 text-sm">
-          <p className="font-semibold text-gold">Someone else saved this hole first.</p>
+        <div className="mt-3 rounded-xl bg-brass-soft p-3 text-sm">
+          <p className="font-semibold text-brass">Someone else saved this hole first.</p>
           <p className="text-ink-2 mt-0.5">
             Theirs: {row.sync.theirs.grossScore ?? "–"} gross{row.sync.theirs.putts !== null ? `, ${row.sync.theirs.putts} putts` : ""}. Yours: {gross ?? "–"} gross{e.putts !== null ? `, ${e.putts} putts` : ""}.
           </p>
@@ -380,7 +380,7 @@ function PlayerRow({ player, par, row, onChange, onKeepTheirs, onKeepMine, onAsk
           </div>
         </div>
       )}
-      {row.sync.kind === "error" && <p className="mt-2 text-sm text-red">{row.sync.message}</p>}
+      {row.sync.kind === "error" && <p className="mt-2 text-sm text-neg">{row.sync.message}</p>}
     </section>
   );
 }
@@ -390,11 +390,11 @@ function SyncBadge({ sync, editable }: { sync: SyncState; editable: boolean }) {
   const map: Record<SyncState["kind"], { text: string; cls: string }> = {
     idle: { text: "", cls: "" },
     saving: { text: "Saving…", cls: "text-muted" },
-    saved: { text: "Synced", cls: "text-green" },
-    queued: { text: "Queued offline", cls: "text-gold" },
-    updated: { text: "Updated by another device", cls: "text-green" },
-    error: { text: "Not saved", cls: "text-red" },
-    conflict: { text: "Conflict", cls: "text-gold" },
+    saved: { text: "Synced", cls: "text-accent" },
+    queued: { text: "Queued offline", cls: "text-brass" },
+    updated: { text: "Updated by another device", cls: "text-accent" },
+    error: { text: "Not saved", cls: "text-neg" },
+    conflict: { text: "Conflict", cls: "text-brass" },
   };
   const m = map[sync.kind];
   return <span className={`text-[11px] font-semibold ${m.cls}`} aria-live="polite">{m.text}</span>;
