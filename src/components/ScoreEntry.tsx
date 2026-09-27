@@ -138,7 +138,9 @@ export function ScoreEntry({ roundId, hole, players, focusPlayerId }: { roundId:
         const busy = inFlight.current[p.playerId] || Object.keys(pendingPatch.current[p.playerId] ?? {}).length > 0 || row.sync.kind === "conflict" || row.sync.kind === "queued";
         if (!busy && p.version > row.version) {
           versions.current[p.playerId] = p.version;
-          next[p.playerId] = { ...row, entry: p.entry, version: p.version, sync: { kind: "updated" } };
+          // Same content (e.g. our own queued save coming back) is a silent version bump.
+          const differs = JSON.stringify(p.entry) !== JSON.stringify(row.entry);
+          next[p.playerId] = { ...row, entry: p.entry, version: p.version, sync: differs ? { kind: "updated" } : row.sync };
           changed = true;
         }
       }
