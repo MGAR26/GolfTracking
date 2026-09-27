@@ -14,7 +14,7 @@ import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
 
-export interface Player { id: string; name: string; handicapIndex: number }
+export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[] }
 export interface Trip { id: string; name: string; destination: string | null; startDate: string | null; endDate: string | null; ownerId: string; playerIds: string[] }
 export interface Course { id: string; name: string; teeName: string; par: number; courseRating: number; slopeRating: number; holes: HoleInfo[] }
 export interface RoundPlayer { playerId: string; handicapIndexSnapshot: number; courseHandicap: number; playingHandicap: number }

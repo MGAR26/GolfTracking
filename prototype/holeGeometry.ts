@@ -126,3 +126,55 @@ export function toPath(pts: Pt[], close = true): string {
   if (pts.length === 0) return "";
   return pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.v.toFixed(1)} ${(-p.u).toFixed(1)}`).join(" ") + (close ? " Z" : "");
 }
+
+/* ---------- hazards and lay-ups ---------- */
+export interface HazardDistance { kind: "bunker" | "water" | "trees"; side: "L" | "R" | "C"; to: number; carry: number }
+
+function sideOf(from: Pt, toward: Pt, p: Pt): "L" | "R" | "C" {
+  const cross = (toward.u - from.u) * (p.v - from.v) - (toward.v - from.v) * (p.u - from.u);
+  // Frame is u forward, v to the right when looking from the tee (screen x grows with v).
+  return Math.abs(cross) < 1e-6 ? "C" : cross > 0 ? "R" : "L";
+}
+
+/**
+ * Distances to hazards that are in play: ahead of the player and within a cone around the
+ * line to the flag. "to" is the near edge, "carry" the far edge, the way a caddie calls it.
+ */
+export function hazardDistances(from: Pt, flag: Pt, hole: HoleShape, coneDeg = 28): HazardDistance[] {
+  const total = dist(from, flag);
+  const dir = { u: (flag.u - from.u) / total, v: (flag.v - from.v) / total };
+  const cos = Math.cos((coneDeg * Math.PI) / 180);
+  const consider = (kind: HazardDistance["kind"], outline: Pt[]): HazardDistance | null => {
+    let to = Infinity, carry = 0, inCone = false;
+    const centroid = outline.reduce((a, p) => ({ u: a.u + p.u / outline.length, v: a.v + p.v / outline.length }), { u: 0, v: 0 });
+    for (const p of outline) {
+      const d = dist(from, p);
+      if (d < 5) continue;
+      const along = ((p.u - from.u) * dir.u + (p.v - from.v) * dir.v) / d;
+      if (along > cos) inCone = true;
+      to = Math.min(to, d);
+      carry = Math.max(carry, d);
+    }
+    if (!inCone || to > total + 10) return null;
+    return { kind, side: sideOf(from, flag, centroid), to, carry };
+  };
+  const out: HazardDistance[] = [];
+  for (const b of hole.bunkers) { const h = consider("bunker", ellipsePath(b, 20)); if (h) out.push(h); }
+  if (hole.water) { const h = consider("water", hole.water); if (h) out.push(h); }
+  // Tree clusters: group trees by side and report the nearest edge of the line of trees ahead.
+  for (const side of ["L", "R"] as const) {
+    const pts = hole.trees.filter((t) => sideOf(from, flag, t) === side && (t.u - from.u) * dir.u + (t.v - from.v) * dir.v > 20);
+    if (pts.length < 3) continue;
+    const h = consider("trees", pts.map((t) => ({ u: t.u, v: t.v })));
+    if (h) out.push({ ...h, side });
+  }
+  return out.sort((a, b) => a.to - b.to);
+}
+
+/** Where to land to leave exactly `n` yards to the flag, along the line from `from`. */
+export function layupPoint(from: Pt, flag: Pt, n: number): { point: Pt; distance: number } | null {
+  const total = dist(from, flag);
+  if (total <= n + 5) return null;
+  const t = (total - n) / total;
+  return { point: { u: from.u + (flag.u - from.u) * t, v: from.v + (flag.v - from.v) * t }, distance: total - n };
+}

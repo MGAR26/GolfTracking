@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { buildHole, dist, ellipsePath, greenDistances, type Ellipse, type Pt } from "./holeGeometry";
+import { buildHole, dist, ellipsePath, greenDistances, hazardDistances, layupPoint, type Ellipse, type Pt } from "./holeGeometry";
 
 /**
  * Tee-view hole card: a perspective rendering of the hole from behind the tee with the
@@ -24,7 +24,8 @@ function path(pts: Pt[], close = true): string {
 }
 const ell = (e: Ellipse) => path(ellipsePath(e, 36));
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex }: { holeNumber: number; par: number; yardage: number | null; strokeIndex: number }) {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange }: { holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void }) {
+  const [editNumbers, setEditNumbers] = useState(false);
   const hole = useMemo(() => buildHole(holeNumber, par, yardage), [holeNumber, par, yardage]);
   const [pos, setPos] = useState<Pt>({ u: 0, v: 0 });
   const d = greenDistances(pos, hole.green);
@@ -52,6 +53,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex }: { holeNumber
 
   const you = project(pos);
   const fl = project(flag);
+  const hazards = hazardDistances(pos, flag, hole).slice(0, 4);
+  const layups = numbers.map((n) => ({ n, ...layupPoint(pos, flag, n) })).filter((l) => l.point) as { n: number; point: Pt; distance: number }[];
 
   return (
     <div className="card overflow-hidden !p-0" data-testid="hole-view">
@@ -81,6 +84,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex }: { holeNumber
           {/* flag */}
           <line x1={fl.x} y1={fl.y} x2={fl.x} y2={fl.y - 22 * Math.min(1, fl.s * 3)} stroke="#f7f3ea" strokeWidth={1.3} />
           <path d={`M${fl.x} ${fl.y - 22 * Math.min(1, fl.s * 3)} l8 3.5 l-8 3.5 z`} fill="#7a1f2b" />
+          {/* lay-up spots for "your numbers" */}
+          {layups.map((l, i) => { const q = project(l.point); const left = i % 2 === 1; return <g key={l.n}><circle cx={q.x} cy={q.y} r={4} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1.2} /><text x={left ? q.x - 6 : q.x + 6} y={q.y + 3} textAnchor={left ? "end" : "start"} fontSize={8} fill="#f7f3ea" fontWeight={700} style={{ paintOrder: "stroke", stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 }}>{l.n} in</text></g>; })}
           {/* you */}
           <circle cx={you.x} cy={you.y} r={11} fill="none" stroke="#1b2a41" strokeWidth={1} opacity={0.5} />
           <circle cx={you.x} cy={you.y} r={5.5} fill="#1b2a41" stroke="#f7f3ea" strokeWidth={1.8} />
@@ -99,9 +104,41 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex }: { holeNumber
           ))}
         </div>
       </div>
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] text-ink-2 border-t border-line">
-        <span>{atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · {atTee ? "tap the hole to move (GPS does this in the app)" : "distances from where you tapped"}</span>
-        {!atTee && <button type="button" className="font-semibold text-accent whitespace-nowrap" onClick={() => setPos({ u: 0, v: 0 })}>Back to tee</button>}
+      <div className="px-3 py-2 border-t border-line flex flex-col gap-2">
+        <div className="flex flex-wrap gap-1.5" aria-label="Hazards in play">
+          {hazards.length === 0 && <span className="text-[11px] text-muted">Nothing in play between you and the green.</span>}
+          {hazards.map((h, i) => (
+            <span key={i} className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-2 py-1 text-[11px] font-semibold text-ink" data-testid="hazard-chip">
+              <span className={`inline-block h-2 w-2 rounded-sm ${h.kind === "water" ? "bg-[#6d9fc4]" : h.kind === "bunker" ? "bg-[#e0d09c]" : "bg-[#3f6a3c]"}`} />
+              {h.kind === "bunker" ? "Bunker" : h.kind === "water" ? "Water" : "Trees"} {h.side} · {Math.round(h.to)}{h.kind !== "trees" && <span className="text-muted font-normal">–{Math.round(h.carry)}</span>}
+            </span>
+          ))}
+        </div>
+        <div className="flex items-center justify-between gap-2 text-[11px]">
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <span className="text-muted">Your numbers:</span>
+            {numbers.map((n) => {
+              const l = layups.find((x) => x.n === n);
+              return (
+                <span key={n} className="inline-flex items-center gap-1 rounded-md bg-brass-soft px-2 py-1 font-semibold text-ink" data-testid="number-chip">
+                  <span className="inline-block h-2 w-2 rounded-full bg-brass" />{l ? `hit ${Math.round(l.distance)} to leave ${n}` : `${n}: pin is inside it`}
+                </span>
+              );
+            })}
+            <button type="button" className="text-accent font-semibold" onClick={() => setEditNumbers((e) => !e)}>{editNumbers ? "Done" : "Edit"}</button>
+          </div>
+          {!atTee && <button type="button" className="font-semibold text-accent whitespace-nowrap" onClick={() => setPos({ u: 0, v: 0 })}>Back to tee</button>}
+        </div>
+        {editNumbers && (
+          <div className="flex flex-wrap gap-1.5 items-center text-[11px]">
+            {[100, 120, 140, 150, 160, 175, 200].map((n) => {
+              const on = numbers.includes(n);
+              return <button key={n} type="button" aria-pressed={on} onClick={() => onNumbersChange(on ? numbers.filter((x) => x !== n) : [...numbers, n].sort((a, b) => a - b))} className={`tap !min-h-8 rounded-full px-3 font-semibold border ${on ? "bg-ink text-[var(--bg)] border-ink" : "bg-surface border-line-strong"}`}>{n}</button>;
+            })}
+            <span className="text-muted">Yardages you like to hit into greens. Saved to your player settings.</span>
+          </div>
+        )}
+        <p className="text-[10px] text-muted">{atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · tap the hole to move (GPS does this in the app)</p>
       </div>
     </div>
   );
