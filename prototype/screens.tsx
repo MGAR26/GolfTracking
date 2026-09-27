@@ -557,6 +557,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           playerName={me!.displayName}
           par={hole.par}
           penalties={findScore(snap.round, me!.playerId, holeNumber).entry.penaltyStrokes}
+          putts={findScore(snap.round, me!.playerId, holeNumber).entry.putts}
+          gross={findScore(snap.round, me!.playerId, holeNumber).entry.grossScore}
           onUpdate={(id, patch) => mutate((s) => updateShot(s, roundId, id, patch))}
           onUndo={() => mutate((s) => undoShot(s, roundId, s.actorId, holeNumber))}
           onHoleOut={(putts) => { const err = mutate((s) => { const r = holeOut(s, roundId, s.actorId, holeNumber, putts); if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict"); }); if (err) setError(err); }}

@@ -4,13 +4,21 @@ import { bagAverages, CLUBS, DEFAULT_CARRY, type Shape, type Shot, type Trajecto
 
 const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "Dr" ? "Driver" : c);
 
-export function ShotLog({ shots, tracking, onToggle, playerName, par, penalties, onUpdate, onUndo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
-  shots: Shot[]; tracking: boolean; onToggle: () => void; playerName: string; par: number; penalties: number;
+export function ShotLog({ shots, tracking, onToggle, playerName, par, penalties, putts, gross, onUpdate, onUndo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
+  shots: Shot[]; tracking: boolean; onToggle: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
   onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onHoleOut: (putts: number) => void;
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
+  // Draft text for the distance field so the user can clear it and retype without it snapping back.
+  const [draft, setDraft] = useState<{ id: string; text: string } | null>(null);
+  const commitDraft = () => {
+    if (!draft) return;
+    const n = Number(draft.text);
+    if (n > 0) onSetDistance(draft.id, Math.round(n));
+    setDraft(null);
+  };
   const last = shots[shots.length - 1];
   // Edit the shot you tapped; otherwise the newest one.
   const editing = shots.find((s) => s.id === selectedId) ?? last;
@@ -43,7 +51,17 @@ export function ShotLog({ shots, tracking, onToggle, playerName, par, penalties,
             <span className="label !mb-0">Shot {editing.seq} · {Math.round(editing.distance)} yds</span>
             <div className="flex items-center gap-1">
               <button type="button" className="tap !min-h-8 !min-w-8 rounded-md bg-surface border border-line-strong text-sm font-bold" aria-label="5 yards shorter" onClick={() => onSetDistance(editing.id, Math.max(1, Math.round(editing.distance) - 5))}>−5</button>
-              <input className="field !min-h-8 w-16 !px-2 text-center" inputMode="numeric" aria-label={`Shot ${editing.seq} distance`} value={Math.round(editing.distance)} onChange={(e) => { const n = Number(e.target.value); if (n > 0) onSetDistance(editing.id, n); }} />
+              <input
+                className="field !min-h-8 w-16 !px-2 text-center"
+                inputMode="numeric"
+                enterKeyHint="done"
+                aria-label={`Shot ${editing.seq} distance`}
+                value={draft?.id === editing.id ? draft.text : String(Math.round(editing.distance))}
+                onFocus={(e) => { setDraft({ id: editing.id, text: String(Math.round(editing.distance)) }); e.target.select(); }}
+                onChange={(e) => setDraft({ id: editing.id, text: e.target.value.replace(/[^0-9]/g, "") })}
+                onBlur={commitDraft}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+              />
               <button type="button" className="tap !min-h-8 !min-w-8 rounded-md bg-surface border border-line-strong text-sm font-bold" aria-label="5 yards longer" onClick={() => onSetDistance(editing.id, Math.round(editing.distance) + 5)}>+5</button>
               <button type="button" className="tap !min-h-8 text-xs font-semibold text-neg ml-1" onClick={() => { onDelete(editing.id); setSelectedId(null); }}>Delete</button>
             </div>
@@ -67,12 +85,18 @@ export function ShotLog({ shots, tracking, onToggle, playerName, par, penalties,
         <div className="mt-3 flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 text-sm">
             <span className="text-muted">Holed out · putts</span>
-            <div className="seg">{[0, 1, 2, 3].map((n) => <button key={n} type="button" onClick={() => onHoleOut(n)} className="!min-h-9 !px-3" aria-label={`Holed out in ${n} putts`}>{n === 3 ? "3+" : n}</button>)}</div>
+            <div className="seg">{[0, 1, 2, 3].map((n) => <button key={n} type="button" aria-pressed={putts === n || (n === 3 && (putts ?? 0) > 3)} onClick={() => onHoleOut(n === 3 && (putts ?? 0) >= 3 ? (putts ?? 3) + 1 : n)} className="!min-h-9 !px-3" aria-label={`Holed out in ${n} putts`}>{n === 3 ? ((putts ?? 0) > 3 ? String(putts) : "3+") : n}</button>)}</div>
           </div>
           {shots.length > 0 && <button type="button" className="text-xs font-semibold text-accent" onClick={onUndo}>Undo last</button>}
         </div>
       )}
-      {tracking && <p className="mt-2 text-[11px] text-muted">Score will be {shots.length} shot{shots.length === 1 ? "" : "s"} + putts{penalties ? ` + ${penalties} penalty` : ""} (par {par}).</p>}
+      {tracking && (
+        <p className="mt-2 text-[11px] text-muted" data-testid="derived-score">
+          {putts === null
+            ? `Score will be ${shots.length} shot${shots.length === 1 ? "" : "s"} + putts${penalties ? ` + ${penalties} penalty` : ""} (par ${par}). Tap your putt count when you hole out.`
+            : `${shots.length} shot${shots.length === 1 ? "" : "s"} + ${putts} putt${putts === 1 ? "" : "s"}${penalties ? ` + ${penalties} penalty` : ""} = ${gross ?? shots.length + putts + penalties} · written to your card below (par ${par}).`}
+        </p>
+      )}
     </Card>
   );
 }

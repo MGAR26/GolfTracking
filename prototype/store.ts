@@ -14,7 +14,7 @@ import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
 import type { Pt } from "./holeGeometry";
-import { shotFrom, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
+import { shotFrom, suggestClub, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 
 export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[] }
 export interface Trip { id: string; name: string; destination: string | null; startDate: string | null; endDate: string | null; ownerId: string; playerIds: string[] }
@@ -373,6 +373,9 @@ export function setShotDistance(state: State, roundId: string, shotId: string, d
   let len = Math.hypot(du, dv);
   if (len < 1) { du = flag.u - shot.from.u; dv = flag.v - shot.from.v; len = Math.hypot(du, dv) || 1; }
   const to = { u: shot.from.u + (du / len) * distance, v: shot.from.v + (dv / len) * distance };
+  // If the player never overrode the suggested club, re-suggest for the new distance.
+  const others = (round.shots ?? []).filter((x) => x.id !== shot.id);
+  if (shot.club === suggestClub(shot.distance, others, shot.playerId)) shot.club = suggestClub(distance, others, shot.playerId);
   // Later shots keep their own distances: shift their rest points by the same amount.
   const delta = { u: to.u - shot.to.u, v: to.v - shot.to.v };
   for (const later of holeShots(round, shot.playerId, shot.holeNumber)) {
