@@ -536,6 +536,11 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
 
   return (
     <Page className="!pt-3">
+      <header className="flex items-center justify-between -mb-1">
+        <NavBtn onClick={prev !== null ? () => go(prev) : null} label="Previous hole">‹</NavBtn>
+        <p className="text-xs text-ink-2">Hole {hole.holeNumber} of {snap.holes.length}</p>
+        <NavBtn onClick={next !== null ? () => go(next) : null} label="Next hole">›</NavBtn>
+      </header>
       <HoleView
         holeNumber={hole.holeNumber}
         par={hole.par}
@@ -567,11 +572,6 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           onDelete={(id) => mutate((s) => deleteShot(s, roundId, id))}
         />
       )}
-      <header className="flex items-center justify-between -mt-1">
-        <NavBtn onClick={prev !== null ? () => go(prev) : null} label="Previous hole">‹</NavBtn>
-        <p className="text-xs text-ink-2">Hole {hole.holeNumber} of {snap.holes.length}</p>
-        <NavBtn onClick={next !== null ? () => go(next) : null} label="Next hole">›</NavBtn>
-      </header>
       {snap.round.status !== "LIVE" && <p className="text-sm text-muted text-center">This round is locked. Scores are read-only.</p>}
       {snap.round.status === "LIVE" && !anyEditable && <p className="text-sm text-brass text-center">You can&apos;t enter scores for this group in {snap.round.scoringMode.toLowerCase().replace("_", " ")} mode. Switch player at the top to try.</p>}
       {error && <p className="text-sm text-neg text-center">{error}</p>}
