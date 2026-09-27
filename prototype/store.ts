@@ -344,6 +344,50 @@ export function updateShot(state: State, roundId: string, shotId: string, patch:
   const shot = (round.shots ?? []).find((s) => s.id === shotId);
   if (shot) Object.assign(shot, patch);
 }
+/** Rest points are the truth: after any edit, each shot starts where the previous one ended. */
+function rechain(round: Round, playerId: string, holeNumber: number) {
+  const list = holeShots(round, playerId, holeNumber);
+  let from: Pt = { u: 0, v: 0 };
+  list.forEach((sh, i) => {
+    sh.seq = i + 1;
+    sh.from = from;
+    sh.distance = Math.hypot(sh.to.u - from.u, sh.to.v - from.v);
+    from = sh.to;
+  });
+}
+/** Add a shot by typed distance, straight at the flag from the last rest point (off-course entry). */
+export function addShotByDistance(state: State, roundId: string, playerId: string, holeNumber: number, distance: number, flag: Pt): Shot {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const prior = holeShots(round, playerId, holeNumber);
+  const from = prior.length ? prior[prior.length - 1].to : { u: 0, v: 0 };
+  const len = Math.hypot(flag.u - from.u, flag.v - from.v) || 1;
+  const to = { u: from.u + ((flag.u - from.u) / len) * distance, v: from.v + ((flag.v - from.v) / len) * distance };
+  return logShot(state, roundId, playerId, holeNumber, to);
+}
+/** Change a shot's distance along its own direction (toward the flag if it has none); later shots keep their distances. */
+export function setShotDistance(state: State, roundId: string, shotId: string, distance: number, flag: Pt) {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const shot = (round.shots ?? []).find((s) => s.id === shotId);
+  if (!shot) return;
+  let du = shot.to.u - shot.from.u, dv = shot.to.v - shot.from.v;
+  let len = Math.hypot(du, dv);
+  if (len < 1) { du = flag.u - shot.from.u; dv = flag.v - shot.from.v; len = Math.hypot(du, dv) || 1; }
+  const to = { u: shot.from.u + (du / len) * distance, v: shot.from.v + (dv / len) * distance };
+  // Later shots keep their own distances: shift their rest points by the same amount.
+  const delta = { u: to.u - shot.to.u, v: to.v - shot.to.v };
+  for (const later of holeShots(round, shot.playerId, shot.holeNumber)) {
+    if (later.seq > shot.seq) later.to = { u: later.to.u + delta.u, v: later.to.v + delta.v };
+  }
+  shot.to = to;
+  rechain(round, shot.playerId, shot.holeNumber);
+}
+export function deleteShot(state: State, roundId: string, shotId: string) {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const shot = (round.shots ?? []).find((s) => s.id === shotId);
+  if (!shot) return;
+  round.shots = (round.shots ?? []).filter((s) => s.id !== shotId);
+  rechain(round, shot.playerId, shot.holeNumber);
+}
 export function undoShot(state: State, roundId: string, playerId: string, holeNumber: number) {
   const round = state.rounds.find((r) => r.id === roundId)!;
   const prior = holeShots(round, playerId, holeNumber);

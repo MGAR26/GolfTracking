@@ -3,7 +3,8 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView } from "./HoleView";
 import { ShotLog, BagCard } from "./ShotLog";
-import { holeOut, holeShots, logShot, undoShot, updateShot } from "./store";
+import { addShotByDistance, deleteShot, holeOut, holeShots, logShot, setShotDistance, undoShot, updateShot } from "./store";
+import { buildHole } from "./holeGeometry";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
   SEED_HOLES, type Snapshot,
@@ -559,6 +560,9 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           onUpdate={(id, patch) => mutate((s) => updateShot(s, roundId, id, patch))}
           onUndo={() => mutate((s) => undoShot(s, roundId, s.actorId, holeNumber))}
           onHoleOut={(putts) => { const err = mutate((s) => { const r = holeOut(s, roundId, s.actorId, holeNumber, putts); if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict"); }); if (err) setError(err); }}
+          onAddDistance={(yds) => mutate((s) => { addShotByDistance(s, roundId, s.actorId, holeNumber, yds, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c); })}
+          onSetDistance={(id, yds) => mutate((s) => setShotDistance(s, roundId, id, yds, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c))}
+          onDelete={(id) => mutate((s) => deleteShot(s, roundId, id))}
         />
       )}
       <header className="flex items-center justify-between -mt-1">
