@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
+import { HoleView } from "./HoleView";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
   SEED_HOLES, type Snapshot,
@@ -528,12 +529,10 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
 
   return (
     <Page className="!pt-3">
-      <header className="card p-3 flex items-center justify-between">
+      <HoleView holeNumber={hole.holeNumber} par={hole.par} yardage={hole.yardage} strokeIndex={hole.strokeIndex} />
+      <header className="flex items-center justify-between -mt-1">
         <NavBtn onClick={prev !== null ? () => go(prev) : null} label="Previous hole">‹</NavBtn>
-        <div className="text-center">
-          <p className="font-display text-2xl leading-none">Hole {hole.holeNumber}</p>
-          <p className="text-xs text-ink-2 mt-1">Par {hole.par}{hole.yardage ? ` · ${hole.yardage} yds` : ""} · SI {hole.strokeIndex}</p>
-        </div>
+        <p className="text-xs text-ink-2">Hole {hole.holeNumber} of {snap.holes.length}</p>
         <NavBtn onClick={next !== null ? () => go(next) : null} label="Next hole">›</NavBtn>
       </header>
       {snap.round.status !== "LIVE" && <p className="text-sm text-muted text-center">This round is locked. Scores are read-only.</p>}
