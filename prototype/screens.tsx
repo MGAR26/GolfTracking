@@ -536,6 +536,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         strokeIndex={hole.strokeIndex}
         numbers={state.players.find((p) => p.id === state.actorId)?.favoriteYardages ?? [140]}
         onNumbersChange={(n) => mutate((s) => { const me = s.players.find((p) => p.id === s.actorId); if (me) me.favoriteYardages = n; })}
+        wind={state.wind ?? { mph: 12, fromDeg: 225 }}
+        onWindChange={(w) => mutate((s) => { s.wind = w; })}
       />
       <header className="flex items-center justify-between -mt-1">
         <NavBtn onClick={prev !== null ? () => go(prev) : null} label="Previous hole">‹</NavBtn>

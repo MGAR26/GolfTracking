@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { buildHole, dist, ellipsePath, greenDistances, hazardDistances, layupPoint, type Ellipse, type Pt } from "./holeGeometry";
+import { buildHole, compassName, dist, ellipsePath, greenDistances, hazardDistances, holeConditions, layupPoint, playsLike, tiltWords, type Ellipse, type Pt, type Wind } from "./holeGeometry";
 
 /**
  * Tee-view hole card: a perspective rendering of the hole from behind the tee with the
@@ -24,8 +24,12 @@ function path(pts: Pt[], close = true): string {
 }
 const ell = (e: Ellipse) => path(ellipsePath(e, 36));
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange }: { holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void }) {
+const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
+
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange }: { holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void }) {
   const [editNumbers, setEditNumbers] = useState(false);
+  const [editWind, setEditWind] = useState(false);
+  const cond = useMemo(() => holeConditions(holeNumber, par), [holeNumber, par]);
   const hole = useMemo(() => buildHole(holeNumber, par, yardage), [holeNumber, par, yardage]);
   const [pos, setPos] = useState<Pt>({ u: 0, v: 0 });
   const d = greenDistances(pos, hole.green);
@@ -54,6 +58,11 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const you = project(pos);
   const fl = project(flag);
   const hazards = hazardDistances(pos, flag, hole).slice(0, 4);
+  const pl = playsLike(pos, flag, hole.length, cond, wind);
+  // Wind arrow relative to the view: 0° = up the screen (toward the green).
+  const windRel = ((wind.fromDeg + 180 - cond.bearingDeg) % 360 + 360) % 360;
+  const tiltArrow = { from: { u: flag.u - cond.tilt.u * 9, v: flag.v - cond.tilt.v * 9 }, to: { u: flag.u + cond.tilt.u * 9, v: flag.v + cond.tilt.v * 9 } };
+  const ta = project(tiltArrow.from), tb = project(tiltArrow.to);
   const layups = numbers.map((n) => ({ n, ...layupPoint(pos, flag, n) })).filter((l) => l.point) as { n: number; point: Pt; distance: number }[];
 
   return (
@@ -75,6 +84,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {hole.bunkers.map((b, i) => <path key={i} d={ell(b)} fill="#e8dcb0" stroke="#cbbb84" strokeWidth={0.8} />)}
           <path d={ell({ ...hole.green, ru: hole.green.ru + 5, rv: hole.green.rv + 5 })} fill="#9cc873" opacity={0.7} />
           <path d={ell(hole.green)} fill="#b3dc8c" stroke="#79a95a" strokeWidth={1} />
+          {/* fall line of the green */}
+          <line x1={ta.x} y1={ta.y} x2={tb.x} y2={tb.y} stroke="#1b2a41" strokeWidth={1.2} opacity={0.75} />
+          <path d={`M${tb.x} ${tb.y} l${(ta.x - tb.x) * 0.35 + (ta.y - tb.y) * 0.25} ${(ta.y - tb.y) * 0.35 - (ta.x - tb.x) * 0.25} M${tb.x} ${tb.y} l${(ta.x - tb.x) * 0.35 - (ta.y - tb.y) * 0.25} ${(ta.y - tb.y) * 0.35 + (ta.x - tb.x) * 0.25}`} stroke="#1b2a41" strokeWidth={1.2} opacity={0.75} fill="none" />
           {trees.map((t, i) => { const q = project(t); const r = 7 * q.s * 1.2; return <g key={i}><ellipse cx={q.x + r * 0.3} cy={q.y + r * 0.2} rx={r * 1.1} ry={r * 0.4} fill="rgba(0,0,0,0.18)" /><circle cx={q.x} cy={q.y - r * 0.6} r={r} fill="#3f6a3c" /><circle cx={q.x - r * 0.3} cy={q.y - r * 0.9} r={r * 0.55} fill="#4f7d48" /></g>; })}
           {/* tee box */}
           <path d={path([{ u: -3, v: -7 }, { u: 5, v: -7 }, { u: 5, v: 7 }, { u: -3, v: 7 }])} fill="#b3dc8c" stroke="#79a95a" strokeWidth={0.8} />
@@ -95,16 +107,41 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           <div className="font-display text-xl">Hole {holeNumber}</div>
           <div className="text-[10px] uppercase tracking-wide opacity-85">Par {par}{yardage ? ` · ${yardage} yds` : ""} · SI {strokeIndex}</div>
         </div>
-        <div className="absolute top-2 right-2 flex gap-1" aria-label="Distances to green">
-          {(["front", "middle", "back"] as const).map((k) => (
-            <div key={k} className={`rounded-lg px-2 py-1 text-center leading-none ${k === "middle" ? "bg-[var(--bg)] text-ink" : "bg-ink/85 text-[var(--bg)]"}`}>
-              <div className="text-[9px] uppercase tracking-wide opacity-80">{k[0]}</div>
-              <div className="font-display text-lg" data-testid={`dist-${k}`}>{Math.round(d[k])}</div>
-            </div>
-          ))}
+        <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+          <div className="flex gap-1" aria-label="Distances to green">
+            {(["front", "middle", "back"] as const).map((k) => (
+              <div key={k} className={`rounded-lg px-2 py-1 text-center leading-none ${k === "middle" ? "bg-[var(--bg)] text-ink" : "bg-ink/85 text-[var(--bg)]"}`}>
+                <div className="text-[9px] uppercase tracking-wide opacity-80">{k[0]}</div>
+                <div className="font-display text-lg" data-testid={`dist-${k}`}>{Math.round(d[k])}</div>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg bg-brass px-2 py-1 leading-none text-ink flex items-baseline gap-1.5" data-testid="plays-like">
+            <span className="text-[9px] uppercase tracking-wide font-semibold">Plays like</span>
+            <span className="font-display text-lg">{Math.round(pl.playsLike)}</span>
+          </div>
         </div>
+        <button type="button" onClick={() => setEditWind((e) => !e)} className="absolute left-2 top-[62px] rounded-lg bg-ink/85 text-[var(--bg)] px-2 py-1 flex items-center gap-1.5 leading-none" aria-label="Wind">
+          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.5" /><g transform={`rotate(${windRel} 12 12)`}><path d="M12 4 L15.5 12 L12 10.2 L8.5 12 Z" fill="#b08d3c" /><line x1="12" y1="10" x2="12" y2="20" stroke="#b08d3c" strokeWidth="2" strokeLinecap="round" /></g></svg>
+          <span className="text-[10px] font-semibold">{wind.mph} mph from {compassName(wind.fromDeg)}</span>
+        </button>
       </div>
       <div className="px-3 py-2 border-t border-line flex flex-col gap-2">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="plays-like-breakdown">
+          <span className="font-semibold text-ink">Plays like {Math.round(pl.playsLike)} to the middle</span>
+          <span className="text-ink-2">{Math.abs(pl.elevationRemainingFt) < 2 ? "level" : `${Math.round(Math.abs(pl.elevationRemainingFt))} ft ${pl.elevationRemainingFt > 0 ? "uphill" : "downhill"}`} {fmtAdj(pl.elevationAdj)}</span>
+          <span className="text-ink-2">{Math.abs(pl.headwindMph) < 1 ? "no wind along the shot" : `${Math.round(Math.abs(pl.headwindMph))} mph ${pl.headwindMph > 0 ? "into" : "helping"}`} {fmtAdj(pl.windAdj)}{Math.abs(pl.crosswindMph) >= 3 ? ` · ${Math.round(Math.abs(pl.crosswindMph))} mph across ${pl.crosswindMph > 0 ? "L→R" : "R→L"}` : ""}</span>
+          <span className="text-ink-2">Green falls {tiltWords(cond.tilt)} · {cond.tilt.pct}%</span>
+        </div>
+        {editWind && (
+          <div className="rounded-lg bg-surface-2/70 p-2 flex flex-col gap-2 text-[11px]">
+            <label className="flex items-center gap-2"><span className="w-16 text-muted">Wind</span><input type="range" min={0} max={30} value={wind.mph} onChange={(e) => onWindChange({ ...wind, mph: Number(e.target.value) })} className="flex-1 accent-[var(--accent)]" aria-label="Wind speed" /><span className="w-14 text-right font-semibold">{wind.mph} mph</span></label>
+            <div className="flex items-center gap-2"><span className="w-16 text-muted">From</span>
+              <div className="seg flex-1">{["N", "NE", "E", "SE", "S", "SW", "W", "NW"].map((n, i) => <button key={n} type="button" aria-pressed={compassName(wind.fromDeg) === n} onClick={() => onWindChange({ ...wind, fromDeg: i * 45 })} className="!min-h-8 !text-[11px]">{n}</button>)}</div>
+            </div>
+            <span className="text-muted">The app reads the hourly forecast for the course; adjust here to see the effect. Hole {holeNumber} plays toward {compassName(cond.bearingDeg)}.</span>
+          </div>
+        )}
         <div className="flex flex-wrap gap-1.5" aria-label="Hazards in play">
           {hazards.length === 0 && <span className="text-[11px] text-muted">Nothing in play between you and the green.</span>}
           {hazards.map((h, i) => (

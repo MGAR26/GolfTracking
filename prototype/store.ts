@@ -26,7 +26,7 @@ export interface Round {
   scoringMode: ScoringMode; scorerPlayerId: string | null; status: "LIVE" | "LOCKED";
   players: RoundPlayer[]; scores: ScoreRow[]; games: Game[]; sideBets: StoredSideBet[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[] }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number } }
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 const now = () => new Date().toISOString();

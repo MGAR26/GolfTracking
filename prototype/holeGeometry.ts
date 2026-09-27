@@ -178,3 +178,72 @@ export function layupPoint(from: Pt, flag: Pt, n: number): { point: Pt; distance
   const t = (total - n) / total;
   return { point: { u: from.u + (flag.u - from.u) * t, v: from.v + (flag.v - from.v) * t }, distance: total - n };
 }
+
+/* ---------- conditions: elevation, wind, green tilt ---------- */
+export interface HoleConditions {
+  /** Compass bearing from tee to green, degrees clockwise from north. */
+  bearingDeg: number;
+  /** Green elevation minus tee elevation, in feet. */
+  elevationFt: number;
+  /** Fall line of the green in the hole frame (unit vector) and grade in percent. */
+  tilt: { u: number; v: number; pct: number };
+}
+export interface Wind { mph: number; fromDeg: number }
+
+/** Deterministic stand-in for terrain + weather data; the real app reads lidar/terrain tiles and a forecast. */
+export function holeConditions(holeNumber: number, par: number): HoleConditions {
+  const rnd = seeded(holeNumber * 31 + par * 5);
+  const bearingDeg = Math.round(rnd() * 360);
+  const elevationFt = Math.round((rnd() - 0.45) * 60);
+  const a = rnd() * Math.PI * 2;
+  // Most greens fall back-to-front (toward the player), so bias the direction that way.
+  const u = -Math.abs(Math.cos(a)) * 0.8 + (rnd() - 0.5) * 0.3;
+  const v = Math.sin(a);
+  const len = Math.hypot(u, v) || 1;
+  return { bearingDeg, elevationFt, tilt: { u: u / len, v: v / len, pct: Math.round((1 + rnd() * 3) * 10) / 10 } };
+}
+
+export function compassName(deg: number): string {
+  const names = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  return names[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
+}
+
+export interface PlaysLike {
+  distance: number;
+  elevationRemainingFt: number;
+  elevationAdj: number;
+  headwindMph: number;
+  crosswindMph: number;
+  windAdj: number;
+  playsLike: number;
+  shotBearingDeg: number;
+}
+
+/**
+ * Caddie arithmetic, deliberately simple and explainable:
+ *  - elevation: 1 yard per 3 feet of rise or fall between here and the green;
+ *  - wind: a headwind adds 1% of the shot per mph, a tailwind takes off 0.5% per mph.
+ */
+export function playsLike(from: Pt, flag: Pt, holeLength: number, cond: HoleConditions, wind: Wind): PlaysLike {
+  const distance = dist(from, flag);
+  const elevAt = (u: number) => (cond.elevationFt * Math.max(0, Math.min(holeLength, u))) / holeLength;
+  const elevationRemainingFt = cond.elevationFt - elevAt(from.u);
+  const elevationAdj = elevationRemainingFt / 3;
+  // Shot direction relative to the hole axis, then to compass.
+  const rel = (Math.atan2(flag.v - from.v, flag.u - from.u) * 180) / Math.PI;
+  const shotBearingDeg = (((cond.bearingDeg + rel) % 360) + 360) % 360;
+  const windToDeg = (cond.bearingDeg * 0 + wind.fromDeg + 180) % 360;
+  const diff = ((shotBearingDeg - windToDeg + 540) % 360) - 180; // 0 = wind blowing with the shot
+  const along = Math.cos((diff * Math.PI) / 180) * wind.mph; // + tailwind, - headwind
+  const headwindMph = -along;
+  const crosswindMph = Math.sin((diff * Math.PI) / 180) * wind.mph; // + blows to the right of the shot
+  const windAdj = headwindMph > 0 ? distance * 0.01 * headwindMph : distance * 0.005 * headwindMph;
+  return { distance, elevationRemainingFt, elevationAdj, headwindMph, crosswindMph, windAdj, playsLike: distance + elevationAdj + windAdj, shotBearingDeg };
+}
+
+export function tiltWords(t: { u: number; v: number }): string {
+  const parts: string[] = [];
+  if (Math.abs(t.u) > 0.35) parts.push(t.u < 0 ? "back-to-front" : "front-to-back");
+  if (Math.abs(t.v) > 0.35) parts.push(t.v > 0 ? "left-to-right" : "right-to-left");
+  return parts.join(", ") || "nearly flat";
+}
