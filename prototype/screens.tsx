@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView } from "./HoleView";
+import { ShotLog, BagCard } from "./ShotLog";
+import { holeOut, holeShots, logShot, undoShot, updateShot } from "./store";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
   SEED_HOLES, type Snapshot,
@@ -523,6 +525,10 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const go = (h: number) => nav({ name: "round", roundId, tab: "score", hole: h });
   const actorRole = tripRole(state, snap.round.tripId, state.actorId);
   const [error, setError] = useState<string | null>(null);
+  const [tracking, setTracking] = useState(false);
+  const me = snap.players.find((p) => p.playerId === state.actorId);
+  const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
+  const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
   const holeDone = snap.players.every((p) => findScore(snap.round, p.playerId, holeNumber).entry.grossScore !== null);
   const leaderLine = snap.leaderboardNet.filter((r) => r.holesPlayed > 0).slice(0, 3);
   const anyEditable = snap.players.some((p) => canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: p.playerId, roundStatus: snap.round.status }));
@@ -538,7 +544,23 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         onNumbersChange={(n) => mutate((s) => { const me = s.players.find((p) => p.id === s.actorId); if (me) me.favoriteYardages = n; })}
         wind={state.wind ?? { mph: 12, fromDeg: 225 }}
         onWindChange={(w) => mutate((s) => { s.wind = w; })}
+        tracking={tracking && canTrack}
+        shots={myShots}
+        onShot={(to) => mutate((s) => { logShot(s, roundId, s.actorId, holeNumber, to); })}
       />
+      {canTrack && (
+        <ShotLog
+          shots={myShots}
+          tracking={tracking}
+          onToggle={() => setTracking((t) => !t)}
+          playerName={me!.displayName}
+          par={hole.par}
+          penalties={findScore(snap.round, me!.playerId, holeNumber).entry.penaltyStrokes}
+          onUpdate={(id, patch) => mutate((s) => updateShot(s, roundId, id, patch))}
+          onUndo={() => mutate((s) => undoShot(s, roundId, s.actorId, holeNumber))}
+          onHoleOut={(putts) => { const err = mutate((s) => { const r = holeOut(s, roundId, s.actorId, holeNumber, putts); if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict"); }); if (err) setError(err); }}
+        />
+      )}
       <header className="flex items-center justify-between -mt-1">
         <NavBtn onClick={prev !== null ? () => go(prev) : null} label="Previous hole">‹</NavBtn>
         <p className="text-xs text-ink-2">Hole {hole.holeNumber} of {snap.holes.length}</p>
@@ -690,6 +712,7 @@ function StatsTab({ snap }: { snap: Snapshot }) {
           </Card>
         );
       })}
+      <BagCard shots={snap.round.shots ?? []} playerId={state.actorId} playerName={snap.players.find((p) => p.playerId === state.actorId)?.displayName ?? ""} />
       <p className="text-xs text-muted text-center">Percentages only count holes where that stat was entered. Nothing is inferred from the score.</p>
     </Page>
   );

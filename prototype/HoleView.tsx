@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { buildHole, compassName, dist, ellipsePath, greenDistances, hazardDistances, holeConditions, layupPoint, playsLike, tiltWords, type Ellipse, type Pt, type Wind } from "./holeGeometry";
+import type { Shot } from "./shots";
 
 /**
  * Tee-view hole card: a perspective rendering of the hole from behind the tee with the
@@ -26,12 +27,15 @@ const ell = (e: Ellipse) => path(ellipsePath(e, 36));
 
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange }: { holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void }) {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot }: { holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void; tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
   const cond = useMemo(() => holeConditions(holeNumber, par), [holeNumber, par]);
   const hole = useMemo(() => buildHole(holeNumber, par, yardage), [holeNumber, par, yardage]);
-  const [pos, setPos] = useState<Pt>({ u: 0, v: 0 });
+  const [tapPos, setTapPos] = useState<Pt>({ u: 0, v: 0 });
+  // While tracking, "you" are wherever the last logged shot came to rest.
+  const pos = tracking ? (shots.length ? shots[shots.length - 1].to : { u: 0, v: 0 }) : tapPos;
+  const setPos = setTapPos;
   const d = greenDistances(pos, hole.green);
   const atTee = dist(pos, hole.tee) < 1;
   const flag = hole.green.c;
@@ -52,7 +56,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     const y = ((e.clientY - rect.top) / rect.height) * H;
     if (y < HORIZON + 6) return;
     const p = unproject(x, y);
-    setPos({ u: Math.max(-10, Math.min(hole.length + 15, p.u)), v: Math.max(-120, Math.min(120, p.v)) });
+    const clamped = { u: Math.max(-10, Math.min(hole.length + 15, p.u)), v: Math.max(-120, Math.min(120, p.v)) };
+    if (tracking) onShot(clamped);
+    else setPos(clamped);
   };
 
   const you = project(pos);
@@ -96,6 +102,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {/* flag */}
           <line x1={fl.x} y1={fl.y} x2={fl.x} y2={fl.y - 22 * Math.min(1, fl.s * 3)} stroke="#f7f3ea" strokeWidth={1.3} />
           <path d={`M${fl.x} ${fl.y - 22 * Math.min(1, fl.s * 3)} l8 3.5 l-8 3.5 z`} fill="#7a1f2b" />
+          {/* logged shots */}
+          {shots.map((sh) => { const a = project(sh.from), b = project(sh.to); return <g key={sh.id}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#b08d3c" strokeWidth={1.6} /><circle cx={b.x} cy={b.y} r={3.2} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1} /><text x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2} fontSize={8} fill="#f7f3ea" fontWeight={700} style={{ paintOrder: "stroke", stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 }}>{sh.club === "chip" ? "chip" : sh.club} {Math.round(sh.distance)}</text></g>; })}
           {/* lay-up spots for "your numbers" */}
           {layups.map((l, i) => { const q = project(l.point); const left = i % 2 === 1; return <g key={l.n}><circle cx={q.x} cy={q.y} r={4} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1.2} /><text x={left ? q.x - 6 : q.x + 6} y={q.y + 3} textAnchor={left ? "end" : "start"} fontSize={8} fill="#f7f3ea" fontWeight={700} style={{ paintOrder: "stroke", stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 }}>{l.n} in</text></g>; })}
           {/* you */}
@@ -164,7 +172,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             })}
             <button type="button" className="text-accent font-semibold" onClick={() => setEditNumbers((e) => !e)}>{editNumbers ? "Done" : "Edit"}</button>
           </div>
-          {!atTee && <button type="button" className="font-semibold text-accent whitespace-nowrap" onClick={() => setPos({ u: 0, v: 0 })}>Back to tee</button>}
+          {!atTee && !tracking && <button type="button" className="font-semibold text-accent whitespace-nowrap" onClick={() => setPos({ u: 0, v: 0 })}>Back to tee</button>}
         </div>
         {editNumbers && (
           <div className="flex flex-wrap gap-1.5 items-center text-[11px]">
@@ -175,7 +183,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             <span className="text-muted">Yardages you like to hit into greens. Saved to your player settings.</span>
           </div>
         )}
-        <p className="text-[10px] text-muted">{atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · tap the hole to move (GPS does this in the app)</p>
+        <p className="text-[10px] text-muted">{atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · {tracking ? "tracking: tap where your ball came to rest (GPS marks it in the app)" : "tap the hole to move (GPS does this in the app)"}</p>
       </div>
     </div>
   );

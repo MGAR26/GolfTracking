@@ -13,6 +13,8 @@ import { computeNetBalances, computePairwiseObligations, type LedgerEntry } from
 import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
+import type { Pt } from "./holeGeometry";
+import { shotFrom, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 
 export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[] }
 export interface Trip { id: string; name: string; destination: string | null; startDate: string | null; endDate: string | null; ownerId: string; playerIds: string[] }
@@ -24,7 +26,7 @@ export interface ScoreRow { entry: HoleEntry; version: number; updatedBy: string
 export interface Round {
   id: string; tripId: string; courseId: string; name: string; startsAt: string | null; countsTowardTrip: boolean;
   scoringMode: ScoringMode; scorerPlayerId: string | null; status: "LIVE" | "LOCKED";
-  players: RoundPlayer[]; scores: ScoreRow[]; games: Game[]; sideBets: StoredSideBet[];
+  players: RoundPlayer[]; scores: ScoreRow[]; games: Game[]; sideBets: StoredSideBet[]; shots?: Shot[];
 }
 export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number } }
 
@@ -322,3 +324,38 @@ export function tripDashboard(state: State, tripId: string) {
   });
   return { trip, members, rounds, recaps, standings, ledger, balances, obligations: computePairwiseObligations(ledger), settlement: optimizeSettlement(balances), liveRound: rounds.find((r) => r.status === "LIVE") ?? null };
 }
+
+/* ---------- shot tracking ---------- */
+export function holeShots(round: Round, playerId: string, holeNumber: number): Shot[] {
+  return (round.shots ?? []).filter((s) => s.playerId === playerId && s.holeNumber === holeNumber).sort((a, b) => a.seq - b.seq);
+}
+/** "I'm here": the ball came to rest at `to`; the previous rest point (or the tee) is where the shot started. */
+export function logShot(state: State, roundId: string, playerId: string, holeNumber: number, to: Pt): Shot {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  round.shots ??= [];
+  const prior = holeShots(round, playerId, holeNumber);
+  const from = prior.length ? prior[prior.length - 1].to : { u: 0, v: 0 };
+  const shot: Shot = { id: uid(), ...shotFrom(from, to, playerId, holeNumber, prior.length + 1, round.shots) };
+  round.shots.push(shot);
+  return shot;
+}
+export function updateShot(state: State, roundId: string, shotId: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const shot = (round.shots ?? []).find((s) => s.id === shotId);
+  if (shot) Object.assign(shot, patch);
+}
+export function undoShot(state: State, roundId: string, playerId: string, holeNumber: number) {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const prior = holeShots(round, playerId, holeNumber);
+  const last = prior[prior.length - 1];
+  if (last) round.shots = (round.shots ?? []).filter((s) => s.id !== last.id);
+}
+/** Holed out: putts entered, score derived from shots + putts + penalties on the hole entry. */
+export function holeOut(state: State, roundId: string, playerId: string, holeNumber: number, putts: number): SaveResult {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const shots = holeShots(round, playerId, holeNumber);
+  const existing = findScore(round, playerId, holeNumber);
+  const gross = shots.length + putts + existing.entry.penaltyStrokes;
+  return saveScore(state, roundId, playerId, holeNumber, { grossScore: gross, putts }, existing.version);
+}
+export type { Club, Shape, Trajectory, Lie };
