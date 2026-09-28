@@ -3,7 +3,7 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView } from "./HoleView";
 import { ShotLog, BagCard } from "./ShotLog";
-import { addShotByDistance, deleteShot, holeOut, holeShots, logShot, setShotDistance, undoShot, updateShot } from "./store";
+import { addShotByDistance, deleteShot, holeOut, holeShots, logShot, pendingAim, setPendingAim, setShotDistance, undoShot, updateShot } from "./store";
 import { buildHole } from "./holeGeometry";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
@@ -527,6 +527,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const actorRole = tripRole(state, snap.round.tripId, state.actorId);
   const [error, setError] = useState<string | null>(null);
   const [tracking, setTracking] = useState(false);
+  const [aimMode, setAimMode] = useState(false);
   const me = snap.players.find((p) => p.playerId === state.actorId);
   const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
   const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
@@ -553,12 +554,19 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         tracking={tracking && canTrack}
         shots={myShots}
         onShot={(to) => mutate((s) => { logShot(s, roundId, s.actorId, holeNumber, to); })}
+        aim={me ? pendingAim(state, roundId, me.playerId, holeNumber) : null}
+        aimMode={aimMode && tracking && canTrack}
+        onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimMode(false); }}
       />
       {canTrack && (
         <ShotLog
           shots={myShots}
           tracking={tracking}
-          onToggle={() => setTracking((t) => !t)}
+          onToggle={() => { setTracking((t) => !t); setAimMode(false); }}
+          aim={pendingAim(state, roundId, me!.playerId, holeNumber)}
+          aimMode={aimMode}
+          onAimMode={() => setAimMode((a) => !a)}
+          onClearAim={() => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, null)); setAimMode(false); }}
           playerName={me!.displayName}
           par={hole.par}
           penalties={findScore(snap.round, me!.playerId, holeNumber).entry.penaltyStrokes}

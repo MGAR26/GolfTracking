@@ -23,6 +23,28 @@ export interface Shot {
   shape: Shape | null;
   trajectory: Trajectory | null;
   lie: Lie | null;
+  /** Where the player intended the ball to finish, set before the shot. */
+  aim?: Pt | null;
+}
+
+/** Miss relative to the aim point: lateral (+ right of the line from→aim) and long (+ past the aim). */
+export function missFromAim(shot: Shot): { lateral: number; long: number } | null {
+  if (!shot.aim) return null;
+  const du = shot.aim.u - shot.from.u, dv = shot.aim.v - shot.from.v;
+  const len = Math.hypot(du, dv) || 1;
+  const fu = du / len, fv = dv / len;
+  const ru = shot.to.u - shot.from.u, rv = shot.to.v - shot.from.v;
+  const along = ru * fu + rv * fv;
+  const lateral = -ru * fv + rv * fu;
+  return { lateral, long: along - len };
+}
+
+/** Average miss per club from shots that had an aim point. */
+export function dispersion(shots: Shot[], playerId: string, club: Club | "chip"): { n: number; lateral: number; long: number; absLateral: number } | null {
+  const ms = shots.filter((s) => s.playerId === playerId && s.club === club).map(missFromAim).filter((m): m is { lateral: number; long: number } => m !== null);
+  if (ms.length === 0) return null;
+  const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  return { n: ms.length, lateral: avg(ms.map((m) => m.lateral)), long: avg(ms.map((m) => m.long)), absLateral: avg(ms.map((m) => Math.abs(m.lateral))) };
 }
 
 /** Typical distances used until a player has history; overridden by their logged shots. */
@@ -53,7 +75,7 @@ export function suggestClub(distance: number, shots: Shot[], playerId: string): 
   return best;
 }
 
-export function shotFrom(prev: Pt, to: Pt, playerId: string, holeNumber: number, seq: number, shots: Shot[]): Omit<Shot, "id"> {
+export function shotFrom(prev: Pt, to: Pt, playerId: string, holeNumber: number, seq: number, shots: Shot[], aim: Pt | null = null): Omit<Shot, "id"> {
   const distance = dist(prev, to);
-  return { playerId, holeNumber, seq, club: suggestClub(distance, shots, playerId), from: prev, to, distance, shape: null, trajectory: null, lie: null };
+  return { playerId, holeNumber, seq, club: suggestClub(distance, shots, playerId), from: prev, to, distance, shape: null, trajectory: null, lie: null, aim };
 }

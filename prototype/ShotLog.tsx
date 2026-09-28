@@ -1,11 +1,14 @@
 import { useState } from "react";
 import { Card } from "./ui";
-import { bagAverages, CLUBS, DEFAULT_CARRY, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
+import { bagAverages, CLUBS, DEFAULT_CARRY, dispersion, missFromAim, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
+import type { Pt } from "./holeGeometry";
 
 const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "Dr" ? "Driver" : c);
 
-export function ShotLog({ shots, tracking, onToggle, playerName, par, penalties, putts, gross, onUpdate, onUndo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
-  shots: Shot[]; tracking: boolean; onToggle: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
+const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null; const lat = Math.round(Math.abs(m.lateral)), lng = Math.round(Math.abs(m.long)); return `${lat ? `${lat} ${m.lateral > 0 ? "R" : "L"}` : "on line"}${lng ? `, ${lng} ${m.long > 0 ? "long" : "short"}` : ""}`; };
+
+export function ShotLog({ shots, tracking, onToggle, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, onUpdate, onUndo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
+  shots: Shot[]; tracking: boolean; onToggle: () => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
   onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onHoleOut: (putts: number) => void;
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
 }) {
@@ -30,7 +33,7 @@ export function ShotLog({ shots, tracking, onToggle, playerName, par, penalties,
           {shots.map((sh) => (
             <li key={sh.id}>
               <button type="button" onClick={() => setSelectedId(sh.id === editing?.id && selectedId ? null : sh.id)} className={`w-full text-left py-1.5 flex items-center justify-between gap-2 rounded-md px-1 -mx-1 ${tracking && editing?.id === sh.id ? "bg-brass-soft" : ""}`} aria-label={`Edit shot ${sh.seq}`}>
-                <span><span className="text-muted mr-1">{sh.seq}.</span><span className="font-semibold">{clubLabel(sh.club)}</span> <span className="text-ink-2">{Math.round(sh.distance)} yds</span>{sh.shape || sh.trajectory ? <span className="text-muted"> · {[sh.trajectory, sh.shape].filter(Boolean).join(" ")}</span> : null}{sh.lie ? <span className="text-muted"> → {sh.lie}</span> : null}</span>
+                <span><span className="text-muted mr-1">{sh.seq}.</span><span className="font-semibold">{clubLabel(sh.club)}</span> <span className="text-ink-2">{Math.round(sh.distance)} yds</span>{sh.shape || sh.trajectory ? <span className="text-muted"> · {[sh.trajectory, sh.shape].filter(Boolean).join(" ")}</span> : null}{sh.lie ? <span className="text-muted"> → {sh.lie}</span> : null}{sh.aim ? <span className="text-brass"> · miss {missText(sh)}</span> : null}</span>
                 {tracking && <span className="text-[11px] font-semibold text-accent">{editing?.id === sh.id ? "editing" : "edit"}</span>}
               </button>
             </li>
@@ -38,11 +41,20 @@ export function ShotLog({ shots, tracking, onToggle, playerName, par, penalties,
         </ol>
       )}
       {tracking && (
+        <div className="mt-2 flex items-center gap-2 text-sm" data-testid="aim-row">
+          <span className="text-muted whitespace-nowrap">Next shot</span>
+          <button type="button" aria-pressed={aimMode} onClick={onAimMode} className={`btn !min-h-9 text-xs whitespace-nowrap ${aimMode ? "btn-primary" : "btn-secondary"}`} data-testid="aim-toggle">{aimMode ? "Tap the hole…" : aim ? "Move aim" : "Set aim"}</button>
+          {aim && !aimMode && <span className="text-[11px] text-ink-2">Aim set · the miss is recorded when you mark the shot</span>}
+          {aim && !aimMode && <button type="button" className="text-xs font-semibold text-accent" onClick={onClearAim}>Clear</button>}
+          {!aim && !aimMode && <span className="text-[11px] text-muted">Optional. Personalizes your dispersion.</span>}
+        </div>
+      )}
+      {tracking && (
         <form className="mt-2 flex items-center gap-2 text-sm" onSubmit={(e) => { e.preventDefault(); const n = Number(typed); if (n > 0) { onAddDistance(n); setTyped(""); setSelectedId(null); } }} data-testid="add-by-distance">
           <span className="text-muted whitespace-nowrap">Add shot</span>
           <input className="field !min-h-9 w-24" inputMode="numeric" placeholder="yards" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Shot distance in yards" />
           <button type="submit" className="btn btn-secondary !min-h-9 text-xs" disabled={!(Number(typed) > 0)}>Add</button>
-          <span className="text-[11px] text-muted">or tap the hole</span>
+          <span className="text-[11px] text-muted whitespace-nowrap">or tap hole</span>
         </form>
       )}
       {tracking && editing && (
@@ -104,6 +116,8 @@ export function ShotLog({ shots, tracking, onToggle, playerName, par, penalties,
 export function BagCard({ shots, playerId, playerName }: { shots: Shot[]; playerId: string; playerName: string }) {
   const bag = bagAverages(shots, playerId);
   const logged = CLUBS.filter((c) => bag[c]);
+  const disp = Object.fromEntries(CLUBS.map((c) => [c, dispersion(shots, playerId, c)])) as Partial<Record<(typeof CLUBS)[number], ReturnType<typeof dispersion>>>;
+  const dispText = (d: NonNullable<ReturnType<typeof dispersion>>) => { const lat = Math.round(d.lateral), lng = Math.round(d.long); return `${lat === 0 ? "on line" : `${Math.abs(lat)} ${lat > 0 ? "R" : "L"}`}${lng ? ` · ${Math.abs(lng)} ${lng > 0 ? "long" : "short"}` : ""}`; };
   return (
     <Card title={`${playerName} · my bag`} action={<span className="text-xs text-muted">{logged.length ? "from tracked shots" : "defaults until you track"}</span>}>
       <div className="grid grid-cols-4 gap-1.5 text-center">
@@ -114,11 +128,12 @@ export function BagCard({ shots, playerId, playerName }: { shots: Shot[]; player
               <p className="text-[10px] uppercase tracking-wide text-muted">{clubLabel(c)}</p>
               <p className="font-display text-lg leading-tight">{Math.round(b?.avg ?? DEFAULT_CARRY[c])}</p>
               {b && <p className="text-[9px] text-ink-2">{b.n} shot{b.n === 1 ? "" : "s"}</p>}
+              {disp[c] && <p className="text-[9px] text-brass font-semibold" data-testid={`disp-${c}`}>{dispText(disp[c]!)}</p>}
             </div>
           );
         })}
       </div>
-      <p className="mt-2 text-[11px] text-muted">Median of your logged distances per club. Gold tiles are measured; grey are typical numbers until you have data. These feed the club suggestions and your lay-up numbers.</p>
+      <p className="mt-2 text-[11px] text-muted">Median of your logged distances per club. Gold tiles are measured; grey are typical numbers until you have data. The gold line under a club is your average miss from your aim point (right/left, long/short), so the suggestions can adjust for how you actually miss.</p>
     </Card>
   );
 }

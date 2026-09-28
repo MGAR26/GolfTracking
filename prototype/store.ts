@@ -28,7 +28,7 @@ export interface Round {
   scoringMode: ScoringMode; scorerPlayerId: string | null; status: "LIVE" | "LOCKED";
   players: RoundPlayer[]; scores: ScoreRow[]; games: Game[]; sideBets: StoredSideBet[]; shots?: Shot[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number } }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt> }
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 const now = () => new Date().toISOString();
@@ -335,9 +335,22 @@ export function logShot(state: State, roundId: string, playerId: string, holeNum
   round.shots ??= [];
   const prior = holeShots(round, playerId, holeNumber);
   const from = prior.length ? prior[prior.length - 1].to : { u: 0, v: 0 };
-  const shot: Shot = { id: uid(), ...shotFrom(from, to, playerId, holeNumber, prior.length + 1, round.shots) };
+  const key = aimKey(roundId, playerId, holeNumber);
+  const aim = state.pendingAims?.[key] ?? null;
+  const shot: Shot = { id: uid(), ...shotFrom(from, to, playerId, holeNumber, prior.length + 1, round.shots, aim) };
   round.shots.push(shot);
+  if (state.pendingAims) delete state.pendingAims[key];
   return shot;
+}
+const aimKey = (roundId: string, playerId: string, holeNumber: number) => `${roundId}:${playerId}:${holeNumber}`;
+/** Where the player intends the next shot to finish; recorded on that shot when it is logged. */
+export function setPendingAim(state: State, roundId: string, playerId: string, holeNumber: number, aim: Pt | null) {
+  state.pendingAims ??= {};
+  const key = aimKey(roundId, playerId, holeNumber);
+  if (aim) state.pendingAims[key] = aim; else delete state.pendingAims[key];
+}
+export function pendingAim(state: State, roundId: string, playerId: string, holeNumber: number): Pt | null {
+  return state.pendingAims?.[aimKey(roundId, playerId, holeNumber)] ?? null;
 }
 export function updateShot(state: State, roundId: string, shotId: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) {
   const round = state.rounds.find((r) => r.id === roundId)!;
