@@ -3,7 +3,9 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView } from "./HoleView";
 import { ShotLog, BagCard } from "./ShotLog";
-import { addShotByDistance, deleteShot, holeOut, holeShots, logShot, pendingAim, setPendingAim, setShotDistance, undoShot, updateShot } from "./store";
+import { addShotByDistance, deleteShot, holeOut, holeShots, logShot, moveShotRest, pendingAim, replaceHoleShots, setPendingAim, setShotDistance, updateShot } from "./store";
+import type { State } from "./store";
+import type { Shot } from "./shots";
 import { buildHole } from "./holeGeometry";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
@@ -528,9 +530,18 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const [error, setError] = useState<string | null>(null);
   const [tracking, setTracking] = useState(false);
   const [aimMode, setAimMode] = useState(false);
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const me = snap.players.find((p) => p.playerId === state.actorId);
   const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
   const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
+  // Every change to this hole's shots is reversible: snapshots before each edit, one entry per drag.
+  const [undoStack, setUndoStack] = useState<Shot[][]>([]);
+  const [redoStack, setRedoStack] = useState<Shot[][]>([]);
+  const cloneShots = (list: Shot[]) => list.map((sh) => ({ ...sh, from: { ...sh.from }, to: { ...sh.to }, aim: sh.aim ? { ...sh.aim } : sh.aim }));
+  const withUndo = (fn: (s: State) => void) => { const before = cloneShots(myShots); setUndoStack((u) => [...u.slice(-24), before]); setRedoStack([]); return mutate(fn); };
+  const restore = (shots: Shot[]) => mutate((s) => replaceHoleShots(s, roundId, me!.playerId, holeNumber, shots));
+  const doUndo = () => { const before = undoStack[undoStack.length - 1]; if (!before) return; setRedoStack((r) => [...r, cloneShots(myShots)]); setUndoStack((u) => u.slice(0, -1)); restore(before); };
+  const doRedo = () => { const after = redoStack[redoStack.length - 1]; if (!after) return; setUndoStack((u) => [...u, cloneShots(myShots)]); setRedoStack((r) => r.slice(0, -1)); restore(after); };
   const holeDone = snap.players.every((p) => findScore(snap.round, p.playerId, holeNumber).entry.grossScore !== null);
   const leaderLine = snap.leaderboardNet.filter((r) => r.holesPlayed > 0).slice(0, 3);
   const anyEditable = snap.players.some((p) => canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: p.playerId, roundStatus: snap.round.status }));
@@ -553,7 +564,9 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         onWindChange={(w) => mutate((s) => { s.wind = w; })}
         tracking={tracking && canTrack}
         shots={myShots}
-        onShot={(to) => mutate((s) => { logShot(s, roundId, s.actorId, holeNumber, to); })}
+        onShot={(to) => withUndo((s) => { logShot(s, roundId, s.actorId, holeNumber, to); })}
+        onMoveShot={(id, to, first) => (first ? withUndo : mutate)((s) => moveShotRest(s, roundId, id, to))}
+        focusShot={tracking ? myShots.find((s) => s.id === selectedShotId) ?? null : null}
         aim={me ? pendingAim(state, roundId, me.playerId, holeNumber) : null}
         aimMode={aimMode && tracking && canTrack}
         onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimMode(false); }}
@@ -563,6 +576,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           shots={myShots}
           tracking={tracking}
           onToggle={() => { setTracking((t) => !t); setAimMode(false); }}
+          selectedId={selectedShotId}
+          onSelect={setSelectedShotId}
           aim={pendingAim(state, roundId, me!.playerId, holeNumber)}
           aimMode={aimMode}
           onAimMode={() => setAimMode((a) => !a)}
@@ -572,12 +587,15 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           penalties={findScore(snap.round, me!.playerId, holeNumber).entry.penaltyStrokes}
           putts={findScore(snap.round, me!.playerId, holeNumber).entry.putts}
           gross={findScore(snap.round, me!.playerId, holeNumber).entry.grossScore}
-          onUpdate={(id, patch) => mutate((s) => updateShot(s, roundId, id, patch))}
-          onUndo={() => mutate((s) => undoShot(s, roundId, s.actorId, holeNumber))}
+          onUpdate={(id, patch) => withUndo((s) => updateShot(s, roundId, id, patch))}
+          onUndo={doUndo}
+          onRedo={doRedo}
+          canUndo={undoStack.length > 0}
+          canRedo={redoStack.length > 0}
           onHoleOut={(putts) => { const err = mutate((s) => { const r = holeOut(s, roundId, s.actorId, holeNumber, putts); if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict"); }); if (err) setError(err); }}
-          onAddDistance={(yds) => mutate((s) => { addShotByDistance(s, roundId, s.actorId, holeNumber, yds, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c); })}
-          onSetDistance={(id, yds) => mutate((s) => setShotDistance(s, roundId, id, yds, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c))}
-          onDelete={(id) => mutate((s) => deleteShot(s, roundId, id))}
+          onAddDistance={(yds) => withUndo((s) => { addShotByDistance(s, roundId, s.actorId, holeNumber, yds, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c); })}
+          onSetDistance={(id, yds) => withUndo((s) => setShotDistance(s, roundId, id, yds, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c))}
+          onDelete={(id) => withUndo((s) => deleteShot(s, roundId, id))}
         />
       )}
       {snap.round.status !== "LIVE" && <p className="text-sm text-muted text-center">This round is locked. Scores are read-only.</p>}

@@ -362,9 +362,13 @@ function rechain(round: Round, playerId: string, holeNumber: number) {
   const list = holeShots(round, playerId, holeNumber);
   let from: Pt = { u: 0, v: 0 };
   list.forEach((sh, i) => {
+    const distance = Math.hypot(sh.to.u - from.u, sh.to.v - from.v);
+    // A club the player never overrode follows the new distance (e.g. shot 2 becomes shot 1 after a delete).
+    const others = (round.shots ?? []).filter((x) => x.id !== sh.id);
+    if (Math.abs(distance - sh.distance) > 0.5 && sh.club === suggestClub(sh.distance, others, sh.playerId)) sh.club = suggestClub(distance, others, sh.playerId);
     sh.seq = i + 1;
     sh.from = from;
-    sh.distance = Math.hypot(sh.to.u - from.u, sh.to.v - from.v);
+    sh.distance = distance;
     from = sh.to;
   });
 }
@@ -385,7 +389,14 @@ export function setShotDistance(state: State, roundId: string, shotId: string, d
   let du = shot.to.u - shot.from.u, dv = shot.to.v - shot.from.v;
   let len = Math.hypot(du, dv);
   if (len < 1) { du = flag.u - shot.from.u; dv = flag.v - shot.from.v; len = Math.hypot(du, dv) || 1; }
-  const to = { u: shot.from.u + (du / len) * distance, v: shot.from.v + (dv / len) * distance };
+  moveShotRest(state, roundId, shotId, { u: shot.from.u + (du / len) * distance, v: shot.from.v + (dv / len) * distance });
+}
+/** Move where a shot came to rest (drag on the hole view); later shots keep their own distances. */
+export function moveShotRest(state: State, roundId: string, shotId: string, to: Pt) {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const shot = (round.shots ?? []).find((s) => s.id === shotId);
+  if (!shot) return;
+  const distance = Math.hypot(to.u - shot.from.u, to.v - shot.from.v);
   // If the player never overrode the suggested club, re-suggest for the new distance.
   const others = (round.shots ?? []).filter((x) => x.id !== shot.id);
   if (shot.club === suggestClub(shot.distance, others, shot.playerId)) shot.club = suggestClub(distance, others, shot.playerId);
@@ -396,6 +407,13 @@ export function setShotDistance(state: State, roundId: string, shotId: string, d
   }
   shot.to = to;
   rechain(round, shot.playerId, shot.holeNumber);
+}
+/** Restore a player's shots on a hole from a snapshot (undo/redo). */
+export function replaceHoleShots(state: State, roundId: string, playerId: string, holeNumber: number, shots: Shot[]) {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  round.shots = (round.shots ?? []).filter((s) => !(s.playerId === playerId && s.holeNumber === holeNumber));
+  round.shots.push(...shots.map((sh) => ({ ...sh, from: { ...sh.from }, to: { ...sh.to }, aim: sh.aim ? { ...sh.aim } : sh.aim })));
+  rechain(round, playerId, holeNumber);
 }
 export function deleteShot(state: State, roundId: string, shotId: string) {
   const round = state.rounds.find((r) => r.id === roundId)!;

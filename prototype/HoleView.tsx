@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { buildHole, compassName, dist, ellipsePath, greenDistances, hazardDistances, holeConditions, layupPoint, playsLike, tiltWords, type Pt, type Wind } from "./holeGeometry";
 import { missFromAim, type Shot } from "./shots";
 
@@ -65,9 +65,9 @@ function linePath(view: View, a: Pt, b: Pt): string {
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, aim, aimMode, onSetAim }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, aim, aimMode, onSetAim }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void;
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
@@ -78,7 +78,22 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const lastRest = shots.length ? shots[shots.length - 1].to : null;
   const pos = useMemo<Pt>(() => (tracking ? (lastRest ?? { u: 0, v: 0 }) : tapPos), [tracking, lastRest, tapPos]);
   const flag = hole.green.c;
-  const view = useMemo(() => makeView(pos, flag), [pos, flag]);
+  // While a marker is being dragged the camera stays put, otherwise it would slide under the finger.
+  const [frozenPos, setFrozenPos] = useState<Pt | null>(null);
+  // Editing an earlier shot? Look at the hole from where that shot started so it is in frame to drag.
+  const camPos = frozenPos ?? (focusShot ? focusShot.from : pos);
+  const view = useMemo(() => makeView(camPos, flag), [camPos, flag]);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const dragRef = useRef<{ kind: "aim" | "shot" | "you"; id?: string; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  useEffect(() => {
+    // React registers touch listeners as passive; block page scroll ourselves while a drag is live.
+    const el = svgRef.current;
+    if (!el) return;
+    const block = (e: TouchEvent) => { if (dragRef.current) e.preventDefault(); };
+    el.addEventListener("touchmove", block, { passive: false });
+    return () => el.removeEventListener("touchmove", block);
+  }, []);
   const d = greenDistances(pos, hole.green);
   const atTee = dist(pos, hole.tee) < 1;
 
@@ -93,17 +108,51 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const markers = [100, 150, 200].filter((m) => m < hole.length - 30).map((m) => ({ m, p: pointAlong(m) })).filter(({ p }) => ahead(p));
   const trees = hole.trees.filter(ahead).sort((a, b) => view.toView(b).u - view.toView(a).u);
 
-  const onTap = (e: React.MouseEvent<SVGSVGElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * W;
-    const y = ((e.clientY - rect.top) / rect.height) * H;
-    if (y < HORIZON + 6) return;
+  /** Screen point → world point on the ground, clamped to the hole corridor; null above the horizon. */
+  const worldAt = (clientX: number, clientY: number): Pt | null => {
+    const el = svgRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * W;
+    const y = ((clientY - rect.top) / rect.height) * H;
+    if (y < HORIZON + 6) return null;
     const p = view.unproject(x, y);
-    const clamped = { u: Math.max(-10, Math.min(hole.length + 25, p.u)), v: Math.max(-140, Math.min(140, p.v)) };
-    if (tracking && aimMode) onSetAim(clamped);
-    else if (tracking) onShot(clamped);
-    else setTapPos(clamped);
+    return { u: Math.max(-10, Math.min(hole.length + 25, p.u)), v: Math.max(-140, Math.min(140, p.v)) };
   };
+  const onTap = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (suppressClick.current) { suppressClick.current = false; return; }
+    const p = worldAt(e.clientX, e.clientY);
+    if (!p) return;
+    if (tracking && aimMode) onSetAim(p);
+    else if (tracking) onShot(p);
+    else setTapPos(p);
+  };
+  const startDrag = (kind: "aim" | "shot" | "you", id?: string) => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    dragRef.current = { kind, id, moved: false };
+    setFrozenPos(camPos);
+    svgRef.current?.setPointerCapture(e.pointerId);
+  };
+  const onDragMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const p = worldAt(e.clientX, e.clientY);
+    if (!p) return;
+    const first = !d.moved;
+    d.moved = true;
+    if (d.kind === "aim") onSetAim(p);
+    else if (d.kind === "shot" && d.id) onMoveShot(d.id, p, first);
+    else if (d.kind === "you") setTapPos(p);
+  };
+  const endDrag = (e: React.PointerEvent<SVGSVGElement>) => {
+    const d = dragRef.current;
+    if (!d) return;
+    dragRef.current = null;
+    setFrozenPos(null);
+    if (d.moved) suppressClick.current = true;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+  const grab = { style: { touchAction: "none" as const, cursor: "grab" as const } };
 
   const you = view.project(pos);
   const fl = view.project(flag);
@@ -121,7 +170,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   return (
     <div className="card overflow-hidden !p-0" data-testid="hole-view">
       <div className="relative">
-        <svg viewBox={`0 0 ${W} ${H}`} className={`block w-full h-auto select-none ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
+        <svg viewBox={`0 0 ${W} ${H}`} className={`block w-full h-auto select-none ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} ref={svgRef} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
           <defs>
             <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b9c9d8" /><stop offset="100%" stopColor="#e6ece6" /></linearGradient>
             <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8aa66a" /><stop offset="100%" stopColor="#5f7f48" /></linearGradient>
@@ -156,7 +205,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <g key={sh.id}>
                 {ahead(sh.from) && <path d={linePath(view, sh.from, sh.to)} stroke="#b08d3c" strokeWidth={1.6} fill="none" />}
                 {am && <><circle cx={am.x} cy={am.y} r={3.5} fill="none" stroke="#f7f3ea" strokeWidth={1.2} strokeDasharray="2 1.5" /><line x1={am.x} y1={am.y} x2={b.x} y2={b.y} stroke="#f7f3ea" strokeWidth={0.8} opacity={0.7} /></>}
-                {ahead(sh.to) && <><circle cx={b.x} cy={b.y} r={3.2} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1} /><text x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2} {...label}>{sh.club === "chip" ? "chip" : sh.club} {Math.round(sh.distance)}</text></>}
+                {ahead(sh.to) && <><circle cx={b.x} cy={b.y} r={3.2} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1} />{tracking && <circle cx={b.x} cy={b.y} r={14} fill="transparent" {...grab} onPointerDown={startDrag("shot", sh.id)} data-testid={`shot-handle-${sh.seq}`} aria-label={`Drag shot ${sh.seq}`} />}<text x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2} {...label}>{sh.club === "chip" ? "chip" : sh.club} {Math.round(sh.distance)}</text></>}
               </g>
             );
           })}
@@ -171,11 +220,15 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <line x1={aimPt.x - 13} y1={aimPt.y} x2={aimPt.x - 5} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x + 5} y1={aimPt.y} x2={aimPt.x + 13} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} />
               <line x1={aimPt.x} y1={aimPt.y - 13} x2={aimPt.x} y2={aimPt.y - 5} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x} y1={aimPt.y + 5} x2={aimPt.x} y2={aimPt.y + 13} stroke="#f7f3ea" strokeWidth={1.2} />
               <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>aim {Math.round(aimDist ?? 0)}</text>
+              <circle cx={aimPt.x} cy={aimPt.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("aim")} data-testid="aim-handle" aria-label="Drag aim point" />
             </g>
           )}
           {/* you */}
-          <circle cx={you.x} cy={you.y} r={11} fill="none" stroke="#1b2a41" strokeWidth={1} opacity={0.5} />
-          <circle cx={you.x} cy={you.y} r={5.5} fill="#1b2a41" stroke="#f7f3ea" strokeWidth={1.8} />
+          {ahead(pos) && <>
+            <circle cx={you.x} cy={you.y} r={11} fill="none" stroke="#1b2a41" strokeWidth={1} opacity={0.5} />
+            <circle cx={you.x} cy={you.y} r={5.5} fill="#1b2a41" stroke="#f7f3ea" strokeWidth={1.8} />
+            {!tracking && <circle cx={you.x} cy={you.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("you")} aria-label="Drag your position" />}
+          </>}
           <rect y={HORIZON} width={W} height={26} fill="url(#haze)" />
         </svg>
         <div className="absolute top-2 left-2 rounded-lg bg-ink/85 text-[var(--bg)] px-2.5 py-1.5 leading-tight">
@@ -253,7 +306,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
         )}
         <p className="text-[10px] text-muted">
           {atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · the view follows you and zooms to what&apos;s left ·{" "}
-          {tracking ? (aimMode ? "tap the hole to set your aim" : "tap where your ball came to rest (GPS marks it in the app)") : "tap the hole to move (GPS does this in the app)"}
+          {tracking ? (aimMode ? "tap the hole to set your aim" : "tap where your ball came to rest, or drag a ball or the aim point to move it (GPS marks it in the app)") : "tap the hole or drag the dot to move (GPS does this in the app)"}
         </p>
         {shots.some((s) => s.aim) && (
           <p className="text-[10px] text-muted" data-testid="miss-summary">

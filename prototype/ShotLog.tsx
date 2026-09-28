@@ -7,12 +7,12 @@ const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "Dr" ? "Dr
 
 const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null; const lat = Math.round(Math.abs(m.lateral)), lng = Math.round(Math.abs(m.long)); return `${lat ? `${lat} ${m.lateral > 0 ? "R" : "L"}` : "on line"}${lng ? `, ${lng} ${m.long > 0 ? "long" : "short"}` : ""}`; };
 
-export function ShotLog({ shots, tracking, onToggle, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, onUpdate, onUndo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
-  shots: Shot[]; tracking: boolean; onToggle: () => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
-  onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onHoleOut: (putts: number) => void;
+export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
+  shots: Shot[]; tracking: boolean; onToggle: () => void; selectedId: string | null; onSelect: (id: string | null) => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
+  onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onHoleOut: (putts: number) => void;
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const setSelectedId = onSelect;
   const [typed, setTyped] = useState("");
   // Draft text for the distance field so the user can clear it and retype without it snapping back.
   const [draft, setDraft] = useState<{ id: string; text: string } | null>(null);
@@ -31,11 +31,12 @@ export function ShotLog({ shots, tracking, onToggle, aim, aimMode, onAimMode, on
       {shots.length > 0 && (
         <ol className="divide-y divide-line text-sm" data-testid="shot-list">
           {shots.map((sh) => (
-            <li key={sh.id}>
-              <button type="button" onClick={() => setSelectedId(sh.id === editing?.id && selectedId ? null : sh.id)} className={`w-full text-left py-1.5 flex items-center justify-between gap-2 rounded-md px-1 -mx-1 ${tracking && editing?.id === sh.id ? "bg-brass-soft" : ""}`} aria-label={`Edit shot ${sh.seq}`}>
+            <li key={sh.id} className={`flex items-center gap-1 rounded-md -mx-1 ${tracking && editing?.id === sh.id ? "bg-brass-soft" : ""}`}>
+              <button type="button" onClick={() => setSelectedId(sh.id === editing?.id && selectedId ? null : sh.id)} className="flex-1 min-w-0 text-left py-1.5 flex items-center justify-between gap-2 px-1" aria-label={`Edit shot ${sh.seq}`}>
                 <span><span className="text-muted mr-1">{sh.seq}.</span><span className="font-semibold">{clubLabel(sh.club)}</span> <span className="text-ink-2">{Math.round(sh.distance)} yds</span>{sh.shape || sh.trajectory ? <span className="text-muted"> · {[sh.trajectory, sh.shape].filter(Boolean).join(" ")}</span> : null}{sh.lie ? <span className="text-muted"> → {sh.lie}</span> : null}{sh.aim ? <span className="text-brass"> · miss {missText(sh)}</span> : null}</span>
                 {tracking && <span className="text-[11px] font-semibold text-accent">{editing?.id === sh.id ? "editing" : "edit"}</span>}
               </button>
+              {tracking && <button type="button" className="tap !min-h-8 !min-w-8 rounded-md text-muted hover:text-neg text-lg leading-none" aria-label={`Remove shot ${sh.seq}`} onClick={() => { onDelete(sh.id); if (selectedId === sh.id) setSelectedId(null); }}>×</button>}
             </li>
           ))}
         </ol>
@@ -99,7 +100,10 @@ export function ShotLog({ shots, tracking, onToggle, aim, aimMode, onAimMode, on
             <span className="text-muted">Holed out · putts</span>
             <div className="seg">{[0, 1, 2, 3].map((n) => <button key={n} type="button" aria-pressed={putts === n || (n === 3 && (putts ?? 0) > 3)} onClick={() => onHoleOut(n === 3 && (putts ?? 0) >= 3 ? (putts ?? 3) + 1 : n)} className="!min-h-9 !px-3" aria-label={`Holed out in ${n} putts`}>{n === 3 ? ((putts ?? 0) > 3 ? String(putts) : "3+") : n}</button>)}</div>
           </div>
-          {shots.length > 0 && <button type="button" className="text-xs font-semibold text-accent" onClick={onUndo}>Undo last</button>}
+          <div className="flex items-center gap-1">
+            <button type="button" className="btn btn-secondary !min-h-8 !px-2.5 text-xs" onClick={onUndo} disabled={!canUndo} aria-label="Undo">↶ Undo</button>
+            <button type="button" className="btn btn-secondary !min-h-8 !px-2.5 text-xs" onClick={onRedo} disabled={!canRedo} aria-label="Redo">↷</button>
+          </div>
         </div>
       )}
       {tracking && (
