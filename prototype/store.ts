@@ -180,6 +180,11 @@ export function saveScore(state: State, roundId: string, playerId: string, holeN
     state.audit.push({ at: now(), actorId: state.actorId, action: "CHANGE_GROSS", detail: `${nameOf(state, playerId)} hole ${holeNumber}: ${existing.entry.grossScore} → ${patch.grossScore}` });
   }
   existing.entry = { ...existing.entry, ...patch };
+  // A tracked hole derives its score: if putts or penalties change and shots are logged, the gross follows.
+  if (patch.grossScore === undefined && (patch.putts !== undefined || patch.penaltyStrokes !== undefined)) {
+    const shots = holeShots(round, playerId, holeNumber);
+    if (shots.length > 0 && existing.entry.putts !== null) existing.entry.grossScore = shots.length + existing.entry.putts + existing.entry.penaltyStrokes;
+  }
   existing.version += 1;
   existing.updatedBy = state.actorId;
   return { status: "saved", version: existing.version };
@@ -377,6 +382,7 @@ export function logShot(state: State, roundId: string, playerId: string, holeNum
   const shot: Shot = { id: uid(), ...shotFrom(from, to, playerId, holeNumber, prior.length + 1, round.shots, aim) };
   round.shots.push(shot);
   if (state.pendingAims) delete state.pendingAims[key];
+  resyncTrackedScore(state, roundId, playerId, holeNumber);
   return shot;
 }
 const aimKey = (roundId: string, playerId: string, holeNumber: number) => `${roundId}:${playerId}:${holeNumber}`;
@@ -451,6 +457,7 @@ export function replaceHoleShots(state: State, roundId: string, playerId: string
   round.shots = (round.shots ?? []).filter((s) => !(s.playerId === playerId && s.holeNumber === holeNumber));
   round.shots.push(...shots.map((sh) => ({ ...sh, from: { ...sh.from }, to: { ...sh.to }, aim: sh.aim ? { ...sh.aim } : sh.aim })));
   rechain(round, playerId, holeNumber);
+  resyncTrackedScore(state, roundId, playerId, holeNumber);
 }
 export function deleteShot(state: State, roundId: string, shotId: string) {
   const round = state.rounds.find((r) => r.id === roundId)!;
@@ -458,6 +465,7 @@ export function deleteShot(state: State, roundId: string, shotId: string) {
   if (!shot) return;
   round.shots = (round.shots ?? []).filter((s) => s.id !== shotId);
   rechain(round, shot.playerId, shot.holeNumber);
+  resyncTrackedScore(state, roundId, shot.playerId, shot.holeNumber);
 }
 export function undoShot(state: State, roundId: string, playerId: string, holeNumber: number) {
   const round = state.rounds.find((r) => r.id === roundId)!;
@@ -466,6 +474,14 @@ export function undoShot(state: State, roundId: string, playerId: string, holeNu
   if (last) round.shots = (round.shots ?? []).filter((s) => s.id !== last.id);
 }
 /** Holed out: putts entered, score derived from shots + putts + penalties on the hole entry. */
+/** After shots change on a hole that is already holed out, keep the gross = shots + putts + penalties. */
+function resyncTrackedScore(state: State, roundId: string, playerId: string, holeNumber: number) {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const existing = findScore(round, playerId, holeNumber);
+  if (existing.version === 0 || existing.entry.putts === null) return;
+  const gross = holeShots(round, playerId, holeNumber).length + existing.entry.putts + existing.entry.penaltyStrokes;
+  if (gross !== existing.entry.grossScore) saveScore(state, roundId, playerId, holeNumber, { grossScore: gross }, existing.version);
+}
 export function holeOut(state: State, roundId: string, playerId: string, holeNumber: number, putts: number): SaveResult {
   const round = state.rounds.find((r) => r.id === roundId)!;
   const shots = holeShots(round, playerId, holeNumber);

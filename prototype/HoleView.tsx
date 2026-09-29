@@ -10,9 +10,10 @@ import { missFromAim, type Shot } from "./shots";
  * from GPS; here the layout is drawn from hole geometry and you tap to move.
  */
 const W = 400, H = 300, CX = 200;
-// Camera pitch: the horizon sits above the frame so the view is steep enough to judge depth,
-// "you" sit near the bottom, and the camera hangs one shot-length behind the ball.
-const HORIZON = -90, NEAR_Y = 272, BACK_RATIO = 2.0;
+// "You" sit near the bottom of the frame and the flag lands near the top, whatever is left to play.
+// Inside 250 yards the camera climbs (further back, horizon further above the frame) so the green
+// has real depth on screen and an aim point can be placed accurately.
+const NEAR_Y = 272, FLAG_Y = 100;
 
 interface View {
   toView: (p: Pt) => Pt;
@@ -20,6 +21,8 @@ interface View {
   projectView: (q: Pt) => { x: number; y: number; s: number };
   unproject: (x: number, y: number) => Pt;
   near: number;
+  /** Screen y of the horizon (above the frame when the camera is steep). */
+  horizon: number;
   /** True for the top-down green view (no perspective). */
   overhead: boolean;
 }
@@ -34,9 +37,16 @@ function makeView(pos: Pt, flag: Pt, green: Ellipse): View {
   const fu = d0 > 1 ? (flag.u - pos.u) / d0 : 1, fv = d0 > 1 ? (flag.v - pos.v) / d0 : 0;
   const ru = -fv, rv = fu; // right of the line of play
   if (d0 <= GREEN_VIEW_YDS) return overheadView(pos, green, fu, fv);
-  const camBack = BACK_RATIO * D + 15;
-  const frameAtFlag = Math.max(80, 0.5 * D); // yards visible across the frame at the flag
-  const F = (W * (camBack + D)) / frameAtFlag; // focal length: zoom so the remaining shot fills the frame
+  // steeper (more overhead) the closer you are: ratio of camera set-back to shot length
+  const t = Math.min(1, Math.max(0, (D - 100) / 250)); // 0 inside 100 yds … 1 at 350+
+  const back = 3.5 - 1.5 * t; // 3.5× inside 100 yds → 2× on long holes
+  const camBack = back * D + 15;
+  const HORIZON = FLAG_Y * (1 + back) - NEAR_Y * back; // solves flag → FLAG_Y, you → NEAR_Y
+  // how squashed the green looks: near-round when close, more oblique from the tee
+  const greenAspect = 0.66 - 0.36 * t;
+  const vScaleAtFlag = ((NEAR_Y - HORIZON) * camBack) / ((camBack + D) * (camBack + D)); // px per yard of depth at the flag
+  const frameAtFlag = W / (vScaleAtFlag / greenAspect); // yards visible across the frame at the flag
+  const F = (W * (camBack + D)) / frameAtFlag; // focal length
   const camH = ((NEAR_Y - HORIZON) * camBack) / F; // puts "you" near the bottom of the frame
   const toView = (p: Pt): Pt => { const du = p.u - pos.u, dv = p.v - pos.v; return { u: du * fu + dv * fv, v: du * ru + dv * rv }; };
   const projectView = (q: Pt) => { const depth = Math.max(6, q.u + camBack); const s = F / depth; return { x: CX + q.v * s, y: HORIZON + camH * s, s }; };
@@ -46,7 +56,7 @@ function makeView(pos: Pt, flag: Pt, green: Ellipse): View {
     const vu = depth - camBack, vv = ((x - CX) * depth) / F;
     return { u: pos.u + vu * fu + vv * ru, v: pos.v + vu * fv + vv * rv };
   };
-  return { toView, project, projectView, unproject, near: -camBack + 8, overhead: false };
+  return { toView, project, projectView, unproject, near: -camBack + 8, horizon: HORIZON, overhead: false };
 }
 /** Straight down over the green, rotated so the line from you to the flag points up the screen. */
 function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number): View {
@@ -58,7 +68,7 @@ function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number): View {
   const project = (p: Pt) => projectView(toView(p));
   const unproject = (x: number, y: number): Pt => { const vu = (CY - y) / s, vv = (x - CX) / s; return { u: green.c.u + vu * fu + vv * ru, v: green.c.v + vu * fv + vv * rv }; };
   void pos;
-  return { toView, project, projectView, unproject, near: -1e9, overhead: true };
+  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true };
 }
 
 /** Clip a polygon (view coords) to the half-space in front of the camera. */
@@ -144,7 +154,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     const rect = el.getBoundingClientRect();
     const x = ((clientX - rect.left) / rect.width) * W;
     const y = ((clientY - rect.top) / rect.height) * H;
-    if (y < HORIZON + 6) return null;
+    if (y < view.horizon + 6) return null;
     const p = view.unproject(x, y);
     return { u: Math.max(-10, Math.min(hole.length + 25, p.u)), v: Math.max(-140, Math.min(140, p.v)) };
   };
@@ -190,8 +200,6 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   // Wind arrow relative to the view: 0° = up the screen (the direction you're facing).
   const shotBearing = pl.shotBearingDeg;
   const windRel = ((wind.fromDeg + 180 - shotBearing) % 360 + 360) % 360;
-  const tiltArrow = { from: { u: flag.u - cond.tilt.u * 9, v: flag.v - cond.tilt.v * 9 }, to: { u: flag.u + cond.tilt.u * 9, v: flag.v + cond.tilt.v * 9 } };
-  const ta = view.project(tiltArrow.from), tb = view.project(tiltArrow.to);
   const layups = numbers.map((n) => ({ n, ...layupPoint(pos, flag, n) })).filter((l) => l.point) as { n: number; point: Pt; distance: number }[];
   const aimPt = aim ? view.project(aim) : null;
   const aimDist = aim ? dist(pos, aim) : null;
@@ -215,15 +223,13 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           <g clipPath={`url(#green-clip-${holeNumber})`} opacity={view.overhead ? 0.95 : 0.8}>
             {surface.cells.map((c, i) => { const h = c.half * 1.04; return <path key={i} d={polyPath(view, [{ u: c.c.u - h, v: c.c.v - h }, { u: c.c.u + h, v: c.c.v - h }, { u: c.c.u + h, v: c.c.v + h }, { u: c.c.u - h, v: c.c.v + h }])} fill={slopeColor(c.pct)} />; })}
           </g>
-          {view.overhead && surface.arrows.map((c, i) => {
-            const len = 2.2 * Math.min(1, c.pct / 3);
+          {/* downhill arrows: dense straight down over the green, sparse on the approach, none from far out */}
+          {surface.arrows.filter((_, i) => view.overhead || (dist(pos, flag) <= 130 && i % 4 === 0)).map((c, i) => {
+            const len = (view.overhead ? 2.2 : 3.6) * Math.min(1, c.pct / 3);
             const a = view.project(c.c), b = view.project({ u: c.c.u + c.du * len, v: c.c.v + c.dv * len });
             const ang = Math.atan2(b.y - a.y, b.x - a.x);
             return <g key={i} opacity={0.75}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#1b2a41" strokeWidth={1} /><path d={`M${b.x} ${b.y} L${b.x - 3.2 * Math.cos(ang - 0.5)} ${b.y - 3.2 * Math.sin(ang - 0.5)} L${b.x - 3.2 * Math.cos(ang + 0.5)} ${b.y - 3.2 * Math.sin(ang + 0.5)} Z`} fill="#1b2a41" /></g>;
           })}
-          {/* fall line of the green */}
-          {!view.overhead && <line x1={ta.x} y1={ta.y} x2={tb.x} y2={tb.y} stroke="#1b2a41" strokeWidth={1.2} opacity={0.75} />}
-          {!view.overhead && <path d={`M${tb.x} ${tb.y} l${(ta.x - tb.x) * 0.35 + (ta.y - tb.y) * 0.25} ${(ta.y - tb.y) * 0.35 - (ta.x - tb.x) * 0.25} M${tb.x} ${tb.y} l${(ta.x - tb.x) * 0.35 - (ta.y - tb.y) * 0.25} ${(ta.y - tb.y) * 0.35 + (ta.x - tb.x) * 0.25}`} stroke="#1b2a41" strokeWidth={1.2} opacity={0.75} fill="none" />}
           {trees.map((t, i) => { const q = view.project(t); const r = Math.min(26, 4.5 * q.s); return <g key={i}><ellipse cx={q.x + r * 0.3} cy={q.y + r * 0.2} rx={r * 1.1} ry={r * 0.4} fill="rgba(0,0,0,0.18)" /><circle cx={q.x} cy={q.y - r * 0.6} r={r} fill="#3f6a3c" /><circle cx={q.x - r * 0.3} cy={q.y - r * 0.9} r={r * 0.55} fill="#4f7d48" /></g>; })}
           {/* tee box */}
           <path d={polyPath(view, [{ u: -3, v: -7 }, { u: 5, v: -7 }, { u: 5, v: 7 }, { u: -3, v: 7 }])} fill="#b3dc8c" stroke="#79a95a" strokeWidth={0.8} />
