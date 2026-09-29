@@ -161,7 +161,7 @@ export function toPath(pts: Pt[], close = true): string {
 }
 
 /* ---------- hazards and lay-ups ---------- */
-export interface HazardDistance { kind: "bunker" | "water" | "trees"; side: "L" | "R" | "C"; to: number; carry: number; /** nearest point of the hazard (where the number is drawn) */ at: Pt }
+export interface HazardDistance { kind: "bunker" | "water" | "trees"; side: "L" | "R" | "C"; to: number; carry: number; /** nearest and farthest points of the hazard (where the numbers are drawn) */ at: Pt; farAt: Pt }
 
 function sideOf(from: Pt, toward: Pt, p: Pt): "L" | "R" | "C" {
   const cross = (toward.u - from.u) * (p.v - from.v) - (toward.v - from.v) * (p.u - from.u);
@@ -178,7 +178,7 @@ export function hazardDistances(from: Pt, flag: Pt, hole: HoleShape, coneDeg = 2
   const dir = { u: (flag.u - from.u) / total, v: (flag.v - from.v) / total };
   const cos = Math.cos((coneDeg * Math.PI) / 180);
   const consider = (kind: HazardDistance["kind"], outline: Pt[]): HazardDistance | null => {
-    let to = Infinity, carry = 0, inCone = false, at: Pt = outline[0];
+    let to = Infinity, carry = 0, inCone = false, at: Pt = outline[0], farAt: Pt = outline[0];
     const centroid = outline.reduce((a, p) => ({ u: a.u + p.u / outline.length, v: a.v + p.v / outline.length }), { u: 0, v: 0 });
     for (const p of outline) {
       const d = dist(from, p);
@@ -186,10 +186,10 @@ export function hazardDistances(from: Pt, flag: Pt, hole: HoleShape, coneDeg = 2
       const along = ((p.u - from.u) * dir.u + (p.v - from.v) * dir.v) / d;
       if (along > cos) inCone = true;
       if (d < to) { to = d; at = p; }
-      carry = Math.max(carry, d);
+      if (d > carry) { carry = d; farAt = p; }
     }
     if (!inCone || to > total + 10) return null;
-    return { kind, side: sideOf(from, flag, centroid), to, carry, at };
+    return { kind, side: sideOf(from, flag, centroid), to, carry, at, farAt };
   };
   const out: HazardDistance[] = [];
   for (const b of hole.bunkers) { const h = consider("bunker", ellipsePath(b, 20)); if (h) out.push(h); }

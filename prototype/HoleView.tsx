@@ -258,18 +258,27 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               </g>
             );
           }))}
-          {/* hazard yardages from where you stand, sitting on the hazard itself */}
-          {hazards.filter((h) => ahead(h.at)).map((h, i) => {
-            const q = view.project(h.at);
-            const fill = h.kind === "water" ? "#4d7fa6" : h.kind === "bunker" ? "#b8a05a" : "#2f5230";
-            const text = h.kind === "trees" ? `${Math.round(h.to)}` : `${Math.round(h.to)}–${Math.round(h.carry)}`;
-            const w = text.length * 5.2 + 8;
-            // overlays: hole label top-left (x<165, y<58) and the info column top-right (x>272, y<128)
-            let x = q.x;
-            if (q.y < 128 && q.x + w / 2 > 270) x = 270 - w / 2 - 2;
-            if (q.y < 58 && q.x - w / 2 < 165) x = 165 + w / 2 + 2;
-            q.x = x;
-            return <g key={i} data-testid="hazard-label"><rect x={q.x - w / 2} y={q.y - 7} width={w} height={13} rx={3.5} fill={fill} opacity={0.92} /><text x={q.x} y={q.y + 3} textAnchor="middle" fontSize={8.5} fontWeight={700} fill="#f7f3ea">{text}</text></g>;
+          {/* hazard yardages: a number in the hazard's colour, set off to the side with a thin leader to the edge it measures */}
+          {hazards.flatMap((h) => {
+            const color = h.kind === "water" ? "#9fd0f0" : h.kind === "bunker" ? "#f1e2a6" : "#b7e29a";
+            const out = h.side === "L" ? -1 : 1; // push labels away from the line of play
+            const pts = h.kind === "trees" ? [{ p: h.at, n: h.to, dy: 0 }] : [{ p: h.at, n: h.to, dy: 9 }, { p: h.farAt, n: h.carry, dy: -9 }];
+            return pts.filter(({ p }) => ahead(p)).map(({ p, n, dy }, k) => {
+              const q = view.project(p);
+              let lx = q.x + out * 30, ly = q.y + dy;
+              const w = String(Math.round(n)).length * 5.6;
+              // keep clear of the top band (hole label, F/M/B) and the info column on the right
+              if (ly < 72) ly = 72;
+              const xmax = out > 0 ? lx + w : lx;
+              if (ly < 134 && xmax > 254) lx -= xmax - 254;
+              return (
+                <g key={`${h.kind}-${h.side}-${k}`} data-testid="hazard-label">
+                  <line x1={q.x} y1={q.y} x2={lx - out * 3} y2={ly} stroke={color} strokeWidth={0.8} opacity={0.9} />
+                  <circle cx={q.x} cy={q.y} r={1.4} fill={color} />
+                  <text x={lx} y={ly + 3} textAnchor={out < 0 ? "end" : "start"} fontSize={9} fontWeight={700} fill={color} style={{ paintOrder: "stroke", stroke: "rgba(27,42,65,0.75)", strokeWidth: 2.5 }}>{Math.round(n)}</text>
+                </g>
+              );
+            });
           })}
           {/* logged shots, with their aim point and miss when one was set */}
           {shots.map((sh) => {
@@ -279,7 +288,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <g key={sh.id}>
                 {ahead(sh.from) && <path d={linePath(view, sh.from, sh.to)} stroke="#b08d3c" strokeWidth={1.6} fill="none" />}
                 {am && <><circle cx={am.x} cy={am.y} r={3.5} fill="none" stroke="#f7f3ea" strokeWidth={1.2} strokeDasharray="2 1.5" /><line x1={am.x} y1={am.y} x2={b.x} y2={b.y} stroke="#f7f3ea" strokeWidth={0.8} opacity={0.7} /></>}
-                {ahead(sh.to) && <><circle cx={b.x} cy={b.y} r={3.2} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1} />{tracking && <circle cx={b.x} cy={b.y} r={14} fill="transparent" {...grab} onPointerDown={startDrag("shot", sh.id)} data-testid={`shot-handle-${sh.seq}`} aria-label={`Drag shot ${sh.seq}`} />}<text x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2} {...label}>{sh.club === "putt" ? `${Math.round(dist(sh.from, flag) * 3)} ft` : `${sh.club} ${Math.round(sh.distance)}`}</text></>}
+                {ahead(sh.to) && <><circle cx={b.x} cy={b.y} r={3.2} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1} />{tracking && <circle cx={b.x} cy={b.y} r={14} fill="transparent" {...grab} onPointerDown={startDrag("shot", sh.id)} data-testid={`shot-handle-${sh.seq}`} aria-label={`Drag shot ${sh.seq}`} />}{(sh.club === "putt" ? view.overhead : Math.hypot(b.x - a.x, b.y - a.y) > 24) && <text x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2} {...label}>{sh.club === "putt" ? `${Math.round(dist(sh.from, flag) * 3)} ft` : `${sh.club} ${Math.round(sh.distance)}`}</text>}</>}
               </g>
             );
           })}
