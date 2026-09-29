@@ -22,8 +22,8 @@ interface Ctx {
 const AppContext = createContext<Ctx | null>(null);
 export const useApp = () => useContext(AppContext)!;
 
-const STORAGE = "gto-proto:v2";
-const NAV_STORAGE = "gto-proto:nav:v2";
+const STORAGE = "gto-proto:v3";
+const NAV_STORAGE = "gto-proto:nav:v3";
 
 function load(): State {
   try {

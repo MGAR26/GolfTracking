@@ -13,7 +13,7 @@ import { computeNetBalances, computePairwiseObligations, type LedgerEntry } from
 import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
-import type { Pt } from "./holeGeometry";
+import { buildHole, type Pt } from "./holeGeometry";
 import { shotFrom, suggestClub, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 
 export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[] }
@@ -27,8 +27,12 @@ export interface Round {
   id: string; tripId: string; courseId: string; name: string; startsAt: string | null; countsTowardTrip: boolean;
   scoringMode: ScoringMode; scorerPlayerId: string | null; status: "LIVE" | "LOCKED";
   players: RoundPlayer[]; scores: ScoreRow[]; games: Game[]; sideBets: StoredSideBet[]; shots?: Shot[];
+  /** Playing groups (foursomes). A round without groups is one group. */
+  groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt> }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter }
+export type ShotFilterMode = "me" | "group" | "all" | "custom";
+export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
 
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 const now = () => new Date().toISOString();
@@ -70,8 +74,35 @@ export function seedState(): State {
     });
   }
   createSideBet(state, { roundId: round.id, type: "LONGEST_DRIVE_IN_FAIRWAY", description: "Longest Drive in Fairway - Hole 8", amountCents: 2000, basis: "GROSS", holeNumbers: [8], opponentIds: ["p_marcus"] }, "p_matt");
+  round.groups = [{ name: "Group A", playerIds: ["p_matt", "p_ryan"] }, { name: "Group B", playerIds: ["p_marcus", "p_john"] }];
+  // Everyone tracked shots on the holes already played (shots = gross − putts), plus the group ahead on hole 4.
+  const tracked: Record<string, number[]> = { p_matt: [2, 3, 2], p_marcus: [3, 3, 2, 3], p_ryan: [3, 3, 1], p_john: [4, 4, 2, 3] };
+  Object.entries(tracked).forEach(([pid, counts], pi) => counts.forEach((n, hi) => seedHoleShots(round, pid, hi + 1, n, pi * 7 + hi)));
   return state;
 }
+/** Deterministic, plausible rest points for a seeded hole: long shots first, last one on or beside the green. */
+function seedHoleShots(round: Round, playerId: string, holeNumber: number, n: number, salt: number) {
+  const h = SEED_HOLES[holeNumber - 1];
+  const green = buildHole(h.holeNumber, h.par, h.yardage).green.c;
+  const rnd = (i: number) => { const x = Math.sin(salt * 97.3 + i * 13.7 + holeNumber * 3.1) * 10000; return x - Math.floor(x); };
+  let from: Pt = { u: 0, v: 0 };
+  round.shots ??= [];
+  for (let i = 1; i <= n; i++) {
+    const last = i === n;
+    const remaining = Math.hypot(green.u - from.u, green.v - from.v);
+    const to: Pt = last
+      ? { u: green.u + (rnd(i) - 0.5) * 22, v: green.v + (rnd(i + 50) - 0.5) * 26 }
+      : { u: from.u + Math.min(remaining - 40, 150 + rnd(i) * 130), v: from.v + (rnd(i + 50) - 0.5) * 60 };
+    round.shots.push({ id: `seed_${playerId}_${holeNumber}_${i}`, ...shotFrom(from, to, playerId, holeNumber, i, round.shots) });
+    from = to;
+  }
+}
+/** Players in the same playing group as `playerId` (everyone when the round has no groups). */
+export function groupMates(round: Round, playerId: string): string[] {
+  const g = (round.groups ?? []).find((x) => x.playerIds.includes(playerId));
+  return g ? g.playerIds : round.players.map((p) => p.playerId);
+}
+export function setShotFilter(state: State, filter: ShotFilter) { state.shotFilter = filter; }
 
 /* ---------- trips ---------- */
 export function createTrip(state: State, input: { name: string; destination: string; startDate: string; endDate: string; players: { name: string; handicapIndex: number }[] }): string {

@@ -26,7 +26,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
   // Edit the shot you tapped; otherwise the newest one.
   const editing = shots.find((s) => s.id === selectedId) ?? last;
   return (
-    <Card title={`${playerName} · shot tracking`} action={<button type="button" className={`btn !min-h-8 text-xs ${tracking ? "btn-primary" : "btn-secondary"}`} onClick={onToggle} data-testid="track-toggle">{tracking ? "Tracking on" : "Track shots"}</button>} className={tracking ? "!border-brass" : ""}>
+    <Card title={`${playerName} · shot tracking`} action={<button type="button" className={`btn !min-h-8 text-xs whitespace-nowrap ${tracking ? "btn-primary" : "btn-secondary"}`} onClick={onToggle} data-testid="track-toggle">{tracking ? "Tracking on" : "Track shots"}</button>} className={tracking ? "!border-brass" : ""}>
       {!tracking && shots.length === 0 && <p className="text-sm text-muted">Turn on tracking, then mark where each shot comes to rest (GPS on the course; here, type a distance or tap the hole). The score fills itself in from shots + putts + penalties.</p>}
       {shots.length > 0 && (
         <ol className="divide-y divide-line text-sm" data-testid="shot-list">
@@ -114,6 +114,40 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
         </p>
       )}
     </Card>
+  );
+}
+
+/** Compact "whose shots" picker for the hole view: a select, and a chip list only when choosing players. */
+export function ShotFilterControl({ mode, playerIds, players, me, hasGroups, onChange }: {
+  mode: "me" | "group" | "all" | "custom"; playerIds: string[]; players: { playerId: string; name: string; color: string }[]; me: string; hasGroups: boolean;
+  onChange: (mode: "me" | "group" | "all" | "custom", playerIds: string[]) => void;
+}) {
+  const shown = mode === "custom" ? players.filter((p) => playerIds.includes(p.playerId)) : [];
+  return (
+    <div className="flex flex-col gap-1.5 text-[11px]" data-testid="shot-filter">
+      <div className="flex items-center gap-2">
+        <span className="text-muted whitespace-nowrap">Shots shown</span>
+        <select className="field !min-h-8 !py-0 !px-2 text-xs font-semibold flex-1" value={mode} aria-label="Whose shots to show" onChange={(e) => onChange(e.target.value as "me" | "group" | "all" | "custom", playerIds)}>
+          <option value="me">Just me</option>
+          {hasGroups && <option value="group">My group</option>}
+          <option value="all">Everyone</option>
+          <option value="custom">Choose players…</option>
+        </select>
+      </div>
+      {mode === "custom" && (
+        <div className="flex flex-wrap gap-1.5">
+          {players.filter((p) => p.playerId !== me).map((p) => {
+            const on = playerIds.includes(p.playerId);
+            return (
+              <button key={p.playerId} type="button" aria-pressed={on} onClick={() => onChange("custom", on ? playerIds.filter((x) => x !== p.playerId) : [...playerIds, p.playerId])} className={`tap !min-h-8 rounded-full pl-2 pr-3 font-semibold border inline-flex items-center gap-1.5 ${on ? "bg-ink text-[var(--bg)] border-ink" : "bg-surface border-line-strong"}`}>
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: p.color }} />{p.name}
+              </button>
+            );
+          })}
+          {shown.length === 0 && <span className="text-muted self-center">Pick who to overlay.</span>}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
-import { HoleView } from "./HoleView";
-import { ShotLog, BagCard } from "./ShotLog";
-import { addShotByDistance, deleteShot, holeOut, holeShots, logShot, moveShotRest, pendingAim, replaceHoleShots, setPendingAim, setShotDistance, updateShot } from "./store";
+import { HoleView, TRAIL_COLORS } from "./HoleView";
+import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
+import { addShotByDistance, deleteShot, groupMates, holeOut, holeShots, logShot, moveShotRest, pendingAim, replaceHoleShots, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { buildHole } from "./holeGeometry";
@@ -534,6 +534,12 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const me = snap.players.find((p) => p.playerId === state.actorId);
   const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
   const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
+  // Whose trails to overlay: just me by default; group, everyone, or a hand-picked set.
+  const filter = state.shotFilter ?? { mode: "me" as const, playerIds: [] };
+  const palette = snap.players.map((p, i) => ({ playerId: p.playerId, name: p.displayName, color: TRAIL_COLORS[i % TRAIL_COLORS.length] }));
+  const hasGroups = (snap.round.groups?.length ?? 0) > 1;
+  const shownIds = !me ? [] : filter.mode === "all" ? snap.players.map((p) => p.playerId) : filter.mode === "group" ? groupMates(snap.round, me.playerId) : filter.mode === "custom" ? filter.playerIds : [];
+  const others = palette.filter((p) => p.playerId !== me?.playerId && shownIds.includes(p.playerId)).map((p) => ({ ...p, shots: holeShots(snap.round, p.playerId, holeNumber) })).filter((p) => p.shots.length > 0);
   // Every change to this hole's shots is reversible: snapshots before each edit, one entry per drag.
   const [undoStack, setUndoStack] = useState<Shot[][]>([]);
   const [redoStack, setRedoStack] = useState<Shot[][]>([]);
@@ -567,10 +573,22 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         onShot={(to) => withUndo((s) => { logShot(s, roundId, s.actorId, holeNumber, to); })}
         onMoveShot={(id, to, first) => (first ? withUndo : mutate)((s) => moveShotRest(s, roundId, id, to))}
         focusShot={tracking ? myShots.find((s) => s.id === selectedShotId) ?? null : null}
+        others={others}
         aim={me ? pendingAim(state, roundId, me.playerId, holeNumber) : null}
         aimMode={aimMode && tracking && canTrack}
         onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimMode(false); }}
       />
+      {me && (
+        <div className="card !py-2 flex flex-col gap-1.5">
+          <ShotFilterControl mode={filter.mode} playerIds={filter.playerIds} players={palette} me={me.playerId} hasGroups={hasGroups} onChange={(mode, ids) => mutate((s) => setShotFilter(s, { mode, playerIds: ids }))} />
+          {filter.mode !== "me" && (
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="trail-legend">
+              {others.length === 0 && <span className="text-muted">Nobody else has tracked this hole yet.</span>}
+              {others.map((o) => <span key={o.playerId} className="inline-flex items-center gap-1 text-ink-2"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: o.color }} />{o.name} · {o.shots.length} shot{o.shots.length === 1 ? "" : "s"}</span>)}
+            </div>
+          )}
+        </div>
+      )}
       {canTrack && (
         <ShotLog
           shots={myShots}

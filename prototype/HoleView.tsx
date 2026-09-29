@@ -62,12 +62,16 @@ function linePath(view: View, a: Pt, b: Pt): string {
   return `M${A.x.toFixed(1)} ${A.y.toFixed(1)} L${B.x.toFixed(1)} ${B.y.toFixed(1)}`;
 }
 
+/** Another player's shots on this hole, drawn in their colour. */
+export interface OtherTrail { playerId: string; name: string; color: string; shots: Shot[] }
+export const TRAIL_COLORS = ["#e4572e", "#3a86ff", "#ffd166", "#c77dff", "#00b4d8", "#f7f3ea", "#ff8fab", "#8ac926"];
+
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, aim, aimMode, onSetAim }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void;
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
@@ -197,6 +201,18 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {/* flag */}
           <line x1={fl.x} y1={fl.y} x2={fl.x} y2={fl.y - 22 * Math.min(1, fl.s * 3)} stroke="#f7f3ea" strokeWidth={1.3} />
           <path d={`M${fl.x} ${fl.y - 22 * Math.min(1, fl.s * 3)} l8 3.5 l-8 3.5 z`} fill="#7a1f2b" />
+          {/* everyone else's trails: thin lines in their colour, initial on the last rest point */}
+          {others.map((o) => o.shots.map((sh, i) => {
+            const isLast = i === o.shots.length - 1;
+            const b = view.project(sh.to);
+            return (
+              <g key={sh.id} data-testid={`trail-${o.playerId}`}>
+                {ahead(sh.from) && <path d={linePath(view, sh.from, sh.to)} stroke={o.color} strokeWidth={1.1} fill="none" opacity={0.85} />}
+                {ahead(sh.to) && <circle cx={b.x} cy={b.y} r={isLast ? 4 : 2.4} fill={o.color} stroke="rgba(27,42,65,0.7)" strokeWidth={0.8} />}
+                {ahead(sh.to) && isLast && <text x={b.x} y={b.y + 2.6} textAnchor="middle" fontSize={6.5} fontWeight={800} fill="#1b2a41">{o.name[0]}</text>}
+              </g>
+            );
+          }))}
           {/* logged shots, with their aim point and miss when one was set */}
           {shots.map((sh) => {
             const a = view.project(sh.from), b = view.project(sh.to);
