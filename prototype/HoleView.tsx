@@ -61,13 +61,17 @@ function makeView(pos: Pt, flag: Pt, green: Ellipse): View {
 /** Straight down over the green, rotated so the line from you to the flag points up the screen. */
 function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number): View {
   const ru = -fv, rv = fu;
-  const CY = H * 0.52;
-  const s = (H * 0.62) / (2 * Math.max(green.ru, green.rv)); // px per yard: green fills ~60% of the height
   const toView = (p: Pt): Pt => { const du = p.u - green.c.u, dv = p.v - green.c.v; return { u: du * fu + dv * fv, v: du * ru + dv * rv }; };
+  // Fit the whole green AND the ball: zoom out until both sit between the top and bottom overlays.
+  const maxR = Math.max(green.ru, green.rv);
+  const ballU = toView(pos).u; // negative: behind the green centre along the line of play
+  const high = maxR + 4, low = Math.min(ballU, -maxR) - 4;
+  const TOP = 34, BOTTOM = H - 34;
+  const s = Math.min((H * 0.62) / (2 * maxR), (BOTTOM - TOP) / (high - low)); // px per yard
+  const CY = (TOP + BOTTOM) / 2 + ((high + low) / 2) * s; // centre the span green-edge → ball
   const projectView = (q: Pt) => ({ x: CX + q.v * s, y: CY - q.u * s, s });
   const project = (p: Pt) => projectView(toView(p));
   const unproject = (x: number, y: number): Pt => { const vu = (CY - y) / s, vv = (x - CX) / s; return { u: green.c.u + vu * fu + vv * ru, v: green.c.v + vu * fv + vv * rv }; };
-  void pos;
   return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true };
 }
 

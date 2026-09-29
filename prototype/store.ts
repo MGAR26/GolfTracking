@@ -539,15 +539,26 @@ function resyncTrackedScore(state: State, roundId: string, playerId: string, hol
   const putts = all.filter(isPutt);
   const strokes = all.length - putts.length;
   const pen = existing.entry.penaltyStrokes;
-  let patch: Partial<HoleEntry>;
+  if (all.length === 0 && !(existing.version > 0 && existing.entry.putts !== null)) return;
+  const patch: Partial<HoleEntry> = {};
   if (putts.length > 0) {
     // Tracked putts own the putt count; the hole is scored once the last putt dropped.
     const holed = all[all.length - 1]?.holed === true;
-    patch = holed ? { grossScore: strokes + putts.length + pen, putts: putts.length } : { grossScore: null, putts: null };
+    Object.assign(patch, holed ? { grossScore: strokes + putts.length + pen, putts: putts.length } : { grossScore: null, putts: null });
   } else if (existing.version > 0 && existing.entry.putts !== null) {
-    patch = { grossScore: strokes + existing.entry.putts + pen };
-  } else return;
-  if (patch.grossScore === existing.entry.grossScore && (patch.putts === undefined || patch.putts === existing.entry.putts)) return;
+    patch.grossScore = strokes + existing.entry.putts + pen;
+  }
+  // Fairway and GIR read straight off the shots: no more tapping L / hit / R.
+  const par = state.courses.find((c) => c.id === round.courseId)!.holes.find((h) => h.holeNumber === holeNumber)!.par;
+  const tee = all[0];
+  if (tee && !isPutt(tee) && par >= 4) patch.fairwayResult = tee.lie === "fairway" ? "HIT" : tee.to.v > 0 ? "RIGHT" : "LEFT";
+  if (tee) {
+    const onGreenAt = all.findIndex((sh) => !isPutt(sh) && sh.lie === "green"); // index = strokes before it
+    if (onGreenAt >= 0) patch.gir = onGreenAt + 1 + pen <= par - 2;
+    else patch.gir = strokes + pen >= par - 2 ? false : null; // still possible until the regulation strokes are used
+  }
+  const changed = (Object.keys(patch) as (keyof HoleEntry)[]).some((k) => patch[k] !== existing.entry[k]);
+  if (!changed) return;
   saveScore(state, roundId, playerId, holeNumber, patch, existing.version);
 }
 export function holeOut(state: State, roundId: string, playerId: string, holeNumber: number, putts: number): SaveResult {
