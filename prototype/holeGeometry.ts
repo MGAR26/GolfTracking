@@ -34,6 +34,22 @@ function ellipsePoint(e: Ellipse, t: number): Pt {
   const x = e.ru * Math.cos(t), y = e.rv * Math.sin(t);
   return { u: e.c.u + x * cos - y * sin, v: e.c.v + x * sin + y * cos };
 }
+/** Normalised radial distance from the ellipse centre: <1 inside, 1 on the edge. */
+export function ellipseRadial(e: Ellipse, p: Pt): number {
+  const dx = p.u - e.c.u, dy = p.v - e.c.v;
+  const cos = Math.cos(-e.rot), sin = Math.sin(-e.rot);
+  const lu = dx * cos - dy * sin, lv = dx * sin + dy * cos;
+  return Math.hypot(lu / e.ru, lv / e.rv);
+}
+/** A point just off the green (within `margin` yards) is pulled onto it; anything else is left alone. */
+export function snapToGreen(e: Ellipse, p: Pt, margin: number): Pt {
+  const r = ellipseRadial(e, p);
+  if (r <= 1) return p;
+  const edgeR = 1 / r; // scale factor to reach the edge along the centre ray
+  const edge = { u: e.c.u + (p.u - e.c.u) * edgeR, v: e.c.v + (p.v - e.c.v) * edgeR };
+  if (Math.hypot(p.u - edge.u, p.v - edge.v) > margin) return p;
+  return { u: e.c.u + (p.u - e.c.u) * edgeR * 0.9, v: e.c.v + (p.v - e.c.v) * edgeR * 0.9 };
+}
 export function ellipsePath(e: Ellipse, steps = 28): Pt[] {
   return Array.from({ length: steps }, (_, i) => ellipsePoint(e, (i / steps) * Math.PI * 2));
 }

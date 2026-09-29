@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildHole, compassName, dist, ellipsePath, greenDistances, hazardDistances, holeConditions, layupPoint, playsLike, tiltWords, type Pt, type Wind } from "./holeGeometry";
+import { buildHole, compassName, dist, ellipsePath, greenDistances, hazardDistances, holeConditions, layupPoint, playsLike, snapToGreen, tiltWords, type Pt, type Wind } from "./holeGeometry";
 import { missFromAim, type Shot } from "./shots";
 
 /**
@@ -9,7 +9,10 @@ import { missFromAim, type Shot } from "./shots";
  * In the real app the ground layer is Mapbox satellite imagery and the position comes
  * from GPS; here the layout is drawn from hole geometry and you tap to move.
  */
-const W = 400, H = 250, HORIZON = 58, CX = 200, F = 410;
+const W = 400, H = 300, CX = 200;
+// Camera pitch: the horizon sits above the frame so the view is steep enough to judge depth,
+// "you" sit near the bottom, and the camera hangs one shot-length behind the ball.
+const HORIZON = -90, NEAR_Y = 272, BACK_RATIO = 2.0;
 
 interface View {
   toView: (p: Pt) => Pt;
@@ -24,8 +27,10 @@ function makeView(pos: Pt, flag: Pt): View {
   const D = Math.max(15, dist(pos, flag));
   const fu = (flag.u - pos.u) / D, fv = (flag.v - pos.v) / D; // forward
   const ru = -fv, rv = fu; // right of the line of play
-  const camBack = 0.37 * D + 15;
-  const camH = (157 * camBack) / F; // puts "you" near the bottom of the frame
+  const camBack = BACK_RATIO * D + 15;
+  const frameAtFlag = Math.max(80, 0.5 * D); // yards visible across the frame at the flag
+  const F = (W * (camBack + D)) / frameAtFlag; // focal length: zoom so the remaining shot fills the frame
+  const camH = ((NEAR_Y - HORIZON) * camBack) / F; // puts "you" near the bottom of the frame
   const toView = (p: Pt): Pt => { const du = p.u - pos.u, dv = p.v - pos.v; return { u: du * fu + dv * fv, v: du * ru + dv * rv }; };
   const projectView = (q: Pt) => { const depth = Math.max(6, q.u + camBack); const s = F / depth; return { x: CX + q.v * s, y: HORIZON + camH * s, s }; };
   const project = (p: Pt) => projectView(toView(p));
@@ -128,7 +133,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     const p = worldAt(e.clientX, e.clientY);
     if (!p) return;
     if (tracking && aimMode) onSetAim(p);
-    else if (tracking) onShot(p);
+    else if (tracking) onShot(snapToGreen(hole.green, p, 6)); // a tap just off the edge means "on the green"
     else setTapPos(p);
   };
   const startDrag = (kind: "aim" | "shot" | "you", id?: string) => (e: React.PointerEvent) => {
@@ -176,14 +181,10 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
       <div className="relative">
         <svg viewBox={`0 0 ${W} ${H}`} className={`block w-full h-auto select-none ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} ref={svgRef} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
           <defs>
-            <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#b9c9d8" /><stop offset="100%" stopColor="#e6ece6" /></linearGradient>
             <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8aa66a" /><stop offset="100%" stopColor="#5f7f48" /></linearGradient>
             <linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#a3c276" /><stop offset="100%" stopColor="#8fb463" /></linearGradient>
-            <linearGradient id="haze" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#e6ece6" stopOpacity="0.95" /><stop offset="100%" stopColor="#e6ece6" stopOpacity="0" /></linearGradient>
           </defs>
-          <rect width={W} height={HORIZON + 1} fill="url(#sky)" />
-          <rect y={HORIZON} width={W} height={H - HORIZON} fill="url(#ground)" />
-          <path d={`M0 ${HORIZON + 2} ${Array.from({ length: 40 }, (_, i) => `L${i * 10.5} ${HORIZON - 1 - ((i * 7919) % 5)}`).join(" ")} L${W} ${HORIZON + 2} Z`} fill="#4c6f45" />
+          <rect width={W} height={H} fill="url(#ground)" />
           {hole.water && <path d={polyPath(view, hole.water)} fill="#6d9fc4" stroke="#4d7fa6" strokeWidth={1} />}
           {hole.fairway.length > 0 && <path d={polyPath(view, hole.fairway)} fill="url(#fw)" stroke="#86ab5c" strokeWidth={0.8} />}
           {hole.bunkers.map((b, i) => <path key={i} d={polyPath(view, ellipsePath(b, 36))} fill="#e8dcb0" stroke="#cbbb84" strokeWidth={0.8} />)}
@@ -192,7 +193,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {/* fall line of the green */}
           <line x1={ta.x} y1={ta.y} x2={tb.x} y2={tb.y} stroke="#1b2a41" strokeWidth={1.2} opacity={0.75} />
           <path d={`M${tb.x} ${tb.y} l${(ta.x - tb.x) * 0.35 + (ta.y - tb.y) * 0.25} ${(ta.y - tb.y) * 0.35 - (ta.x - tb.x) * 0.25} M${tb.x} ${tb.y} l${(ta.x - tb.x) * 0.35 - (ta.y - tb.y) * 0.25} ${(ta.y - tb.y) * 0.35 + (ta.x - tb.x) * 0.25}`} stroke="#1b2a41" strokeWidth={1.2} opacity={0.75} fill="none" />
-          {trees.map((t, i) => { const q = view.project(t); const r = Math.min(40, 7 * q.s * 1.2); return <g key={i}><ellipse cx={q.x + r * 0.3} cy={q.y + r * 0.2} rx={r * 1.1} ry={r * 0.4} fill="rgba(0,0,0,0.18)" /><circle cx={q.x} cy={q.y - r * 0.6} r={r} fill="#3f6a3c" /><circle cx={q.x - r * 0.3} cy={q.y - r * 0.9} r={r * 0.55} fill="#4f7d48" /></g>; })}
+          {trees.map((t, i) => { const q = view.project(t); const r = Math.min(26, 4.5 * q.s); return <g key={i}><ellipse cx={q.x + r * 0.3} cy={q.y + r * 0.2} rx={r * 1.1} ry={r * 0.4} fill="rgba(0,0,0,0.18)" /><circle cx={q.x} cy={q.y - r * 0.6} r={r} fill="#3f6a3c" /><circle cx={q.x - r * 0.3} cy={q.y - r * 0.9} r={r * 0.55} fill="#4f7d48" /></g>; })}
           {/* tee box */}
           <path d={polyPath(view, [{ u: -3, v: -7 }, { u: 5, v: -7 }, { u: 5, v: 7 }, { u: -3, v: 7 }])} fill="#b3dc8c" stroke="#79a95a" strokeWidth={0.8} />
           {/* line of play */}
@@ -245,7 +246,6 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             <circle cx={you.x} cy={you.y} r={5.5} fill="#1b2a41" stroke="#f7f3ea" strokeWidth={1.8} />
             {!tracking && <circle cx={you.x} cy={you.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("you")} aria-label="Drag your position" />}
           </>}
-          <rect y={HORIZON} width={W} height={26} fill="url(#haze)" />
         </svg>
         <div className="absolute top-2 left-2 rounded-lg bg-ink/85 text-[var(--bg)] px-2.5 py-1.5 leading-tight">
           <div className="font-display text-xl">Hole {holeNumber}</div>
@@ -265,7 +265,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             <span className="font-display text-lg">{Math.round(pl.playsLike)}</span>
           </div>
         </div>
-        <button type="button" onClick={() => setEditWind((e) => !e)} className="absolute left-2 top-[62px] rounded-lg bg-ink/85 text-[var(--bg)] px-2 py-1 flex items-center gap-1.5 leading-none" aria-label="Wind">
+        <button type="button" onClick={() => setEditWind((e) => !e)} className="absolute left-2 bottom-2 rounded-lg bg-ink/85 text-[var(--bg)] px-2 py-1 flex items-center gap-1.5 leading-none" aria-label="Wind">
           <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.5" /><g transform={`rotate(${windRel} 12 12)`}><path d="M12 4 L15.5 12 L12 10.2 L8.5 12 Z" fill="#b08d3c" /><line x1="12" y1="10" x2="12" y2="20" stroke="#b08d3c" strokeWidth="2" strokeLinecap="round" /></g></svg>
           <span className="text-[10px] font-semibold">{wind.mph} mph from {compassName(wind.fromDeg)}</span>
         </button>

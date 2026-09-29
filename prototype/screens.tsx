@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
@@ -554,6 +554,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
 
   return (
     <Page className="!pt-3">
+      <MiniScorecard snap={snap} current={holeNumber} onHole={go} />
       <header className="flex items-center justify-between -mb-1">
         <NavBtn onClick={prev !== null ? () => go(prev) : null} label="Previous hole">‹</NavBtn>
         <p className="text-xs text-ink-2">Hole {hole.holeNumber} of {snap.holes.length}</p>
@@ -896,5 +897,56 @@ function FinishTab({ snap }: { snap: Snapshot }) {
       <Button disabled={problems.length > 0} onClick={() => { const err = mutate((s) => finishRound(s, roundId)); if (err) setError(err); else nav({ name: "trip", tripId: snap.round.tripId }); }}>Lock round & post results</Button>
       <p className="text-xs text-muted text-center">Locking makes scores read-only, posts ledger entries, and {snap.round.countsTowardTrip ? "adds this round to trip standings" : "keeps this round standalone"}. Organizers can reopen with an audited correction.</p>
     </Page>
+  );
+}
+
+
+/** One-line scorecard strip: every hole across, a row per player, tap a hole to jump to it. */
+function MiniScorecard({ snap, current, onHole }: { snap: Snapshot; current: number; onHole: (hole: number) => void }) {
+  const ref = useRef<HTMLTableCellElement>(null);
+  useEffect(() => { ref.current?.scrollIntoView({ inline: "center", block: "nearest" }); }, [current]);
+  const cell = (line: { gross: number | null; grossToPar: number | null } | undefined) => {
+    if (!line || line.gross === null) return <span className="text-line-strong">·</span>;
+    const d = line.grossToPar ?? 0;
+    const cls = d <= -2 ? "text-brass font-bold" : d === -1 ? "text-brass font-semibold" : d === 0 ? "text-ink" : d === 1 ? "text-ink-2" : "text-neg";
+    return <span className={cls}>{line.gross}</span>;
+  };
+  return (
+    <div className="card !p-0 scroll-x" data-testid="mini-scorecard">
+      <table className="text-[11px] leading-none border-separate border-spacing-0 min-w-full">
+        <thead>
+          <tr className="text-muted">
+            <th className="sticky left-0 z-10 bg-surface text-left font-semibold px-2 py-1.5">Hole</th>
+            {snap.holes.map((h) => (
+              <th key={h.holeNumber} ref={h.holeNumber === current ? ref : undefined} className={`px-0 py-1.5 w-7 min-w-7 text-center font-semibold ${h.holeNumber === current ? "bg-brass-soft text-ink rounded-t-md" : ""}`}>
+                <button type="button" className="w-full" onClick={() => onHole(h.holeNumber)} aria-label={`Go to hole ${h.holeNumber}`} aria-current={h.holeNumber === current ? "true" : undefined}>{h.holeNumber}</button>
+              </th>
+            ))}
+            <th className="px-2 py-1.5 text-right font-semibold">Tot</th>
+          </tr>
+          <tr className="text-muted">
+            <td className="sticky left-0 z-10 bg-surface px-2 pb-1 text-[9px] uppercase tracking-wide">Par</td>
+            {snap.holes.map((h) => <td key={h.holeNumber} className={`pb-1 text-center text-[9px] ${h.holeNumber === current ? "bg-brass-soft" : ""}`}>{h.par}</td>)}
+            <td className="px-2 pb-1 text-right text-[9px]">{snap.holes.reduce((a, h) => a + h.par, 0)}</td>
+          </tr>
+        </thead>
+        <tbody>
+          {snap.players.map((p) => {
+            const t = snap.totals[p.playerId];
+            return (
+              <tr key={p.playerId} className="border-t border-line">
+                <td className="sticky left-0 z-10 bg-surface px-2 py-1.5 font-semibold whitespace-nowrap border-t border-line">{p.displayName.split(" ")[0]}</td>
+                {snap.holes.map((h) => (
+                  <td key={h.holeNumber} className={`py-1.5 text-center border-t border-line font-display text-[13px] ${h.holeNumber === current ? "bg-brass-soft" : ""}`} onClick={() => onHole(h.holeNumber)}>
+                    {cell(t.holes.find((x) => x.holeNumber === h.holeNumber))}
+                  </td>
+                ))}
+                <td className="px-2 py-1.5 text-right border-t border-line font-display text-[13px] font-semibold">{t.holesPlayed ? t.total.gross : "–"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
