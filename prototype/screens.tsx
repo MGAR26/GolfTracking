@@ -578,6 +578,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         aim={me ? pendingAim(state, roundId, me.playerId, holeNumber) : null}
         aimMode={aimMode && tracking && canTrack}
         onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimMode(false); }}
+        onAimButton={() => { if (!canTrack) return; if (!tracking) setTracking(true); setAimMode((a) => !a); }}
       />
       {me && (
         <div className="card !py-2 flex flex-col gap-1.5">
