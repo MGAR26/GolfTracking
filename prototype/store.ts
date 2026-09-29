@@ -13,8 +13,8 @@ import { computeNetBalances, computePairwiseObligations, type LedgerEntry } from
 import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
-import { buildHole, type Pt } from "./holeGeometry";
-import { shotFrom, suggestClub, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
+import { buildHole, dist, lieAt, type Pt } from "./holeGeometry";
+import { bagAverages, DEFAULT_CARRY, isPutt, shotFrom, suggestClub, CLUBS, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 
 export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[] }
 export interface Trip { id: string; name: string; destination: string | null; startDate: string | null; endDate: string | null; ownerId: string; playerIds: string[] }
@@ -182,8 +182,8 @@ export function saveScore(state: State, roundId: string, playerId: string, holeN
   existing.entry = { ...existing.entry, ...patch };
   // A tracked hole derives its score: if putts or penalties change and shots are logged, the gross follows.
   if (patch.grossScore === undefined && (patch.putts !== undefined || patch.penaltyStrokes !== undefined)) {
-    const shots = holeShots(round, playerId, holeNumber);
-    if (shots.length > 0 && existing.entry.putts !== null) existing.entry.grossScore = shots.length + existing.entry.putts + existing.entry.penaltyStrokes;
+    const strokes = holeShots(round, playerId, holeNumber).filter((s) => !isPutt(s)).length;
+    if (strokes > 0 && existing.entry.putts !== null) existing.entry.grossScore = strokes + existing.entry.putts + existing.entry.penaltyStrokes;
   }
   existing.version += 1;
   existing.updatedBy = state.actorId;
@@ -372,7 +372,7 @@ export function holeShots(round: Round, playerId: string, holeNumber: number): S
   return (round.shots ?? []).filter((s) => s.playerId === playerId && s.holeNumber === holeNumber).sort((a, b) => a.seq - b.seq);
 }
 /** "I'm here": the ball came to rest at `to`; the previous rest point (or the tee) is where the shot started. */
-export function logShot(state: State, roundId: string, playerId: string, holeNumber: number, to: Pt): Shot {
+export function logShot(state: State, roundId: string, playerId: string, holeNumber: number, to: Pt, opts: { club?: Shot["club"]; holed?: boolean } = {}): Shot {
   const round = state.rounds.find((r) => r.id === roundId)!;
   round.shots ??= [];
   const prior = holeShots(round, playerId, holeNumber);
@@ -380,12 +380,68 @@ export function logShot(state: State, roundId: string, playerId: string, holeNum
   const key = aimKey(roundId, playerId, holeNumber);
   const aim = state.pendingAims?.[key] ?? null;
   const shot: Shot = { id: uid(), ...shotFrom(from, to, playerId, holeNumber, prior.length + 1, round.shots, aim) };
+  shot.lie = autoLie(state, round, holeNumber, to);
+  if (opts.club) shot.club = opts.club;
+  if (opts.holed) shot.holed = true;
   round.shots.push(shot);
   if (state.pendingAims) delete state.pendingAims[key];
   resyncTrackedScore(state, roundId, playerId, holeNumber);
   return shot;
 }
 const aimKey = (roundId: string, playerId: string, holeNumber: number) => `${roundId}:${playerId}:${holeNumber}`;
+function holeShape(state: State, round: Round, holeNumber: number) {
+  const h = state.courses.find((c) => c.id === round.courseId)!.holes.find((x) => x.holeNumber === holeNumber)!;
+  return buildHole(h.holeNumber, h.par, h.yardage);
+}
+/** Lie read off the hole geometry; water counts as a rough lie plus the penalty the player adds. */
+function autoLie(state: State, round: Round, holeNumber: number, p: Pt): Lie {
+  const l = lieAt(holeShape(state, round, holeNumber), p);
+  return l === "water" ? "rough" : l;
+}
+/** One-tap tracking: "I'm at my ball". GPS supplies the spot on the course; here the ball is placed
+ *  down the line toward the aim (or the flag) at the club's distance, or at the pin if the club reaches. */
+export function markBall(state: State, roundId: string, playerId: string, holeNumber: number, club: Shot["club"]): Shot {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const prior = holeShots(round, playerId, holeNumber);
+  const from = prior.length ? prior[prior.length - 1].to : { u: 0, v: 0 };
+  const flag = holeShape(state, round, holeNumber).green.c;
+  const target = state.pendingAims?.[aimKey(roundId, playerId, holeNumber)] ?? flag;
+  const remaining = dist(from, target);
+  const carry = club === "putt" ? remaining : club === "chip" ? Math.min(remaining, 20) : (bagAverages(round.shots ?? [], playerId)[club]?.avg ?? DEFAULT_CARRY[club]);
+  const reaches = carry >= remaining * 0.85;
+  const d = reaches ? remaining : carry;
+  const len = remaining || 1;
+  const dir = { u: (target.u - from.u) / len, v: (target.v - from.v) / len };
+  // Demo scatter so a shot that reaches the green doesn't land in the cup: a few percent long/short and left/right.
+  const n = prior.length + holeNumber * 7 + playerId.length;
+  const jitter = (k: number) => { const x = Math.sin(n * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
+  const along = d * (1 + (jitter(1) - 0.5) * (reaches ? 0.14 : 0.08));
+  const side = d * (jitter(2) - 0.5) * (reaches ? 0.12 : 0.1);
+  const to = { u: from.u + dir.u * along - dir.v * side, v: from.v + dir.v * along + dir.u * side };
+  return logShot(state, roundId, playerId, holeNumber, to, { club });
+}
+/** Putts are tracked one at a time from the ball's spot: holed, or missed and left `leaveFt` from the hole. */
+export function logPutt(state: State, roundId: string, playerId: string, holeNumber: number, leaveFt: number | null): Shot {
+  const round = state.rounds.find((r) => r.id === roundId)!;
+  const prior = holeShots(round, playerId, holeNumber);
+  const from = prior.length ? prior[prior.length - 1].to : { u: 0, v: 0 };
+  const flag = holeShape(state, round, holeNumber).green.c;
+  if (leaveFt === null) return logShot(state, roundId, playerId, holeNumber, flag, { club: "putt", holed: true });
+  const len = dist(from, flag);
+  const dir = len > 0.05 ? { u: (flag.u - from.u) / len, v: (flag.v - from.v) / len } : { u: 1, v: 0 };
+  const leave = leaveFt / 3;
+  // a miss usually runs past: rest the ball beyond the hole on the line
+  const to = { u: flag.u + dir.u * leave, v: flag.v + dir.v * leave };
+  return logShot(state, roundId, playerId, holeNumber, to, { club: "putt" });
+}
+/** Club whose distance best fits what's left (never longer than the player's longest club). */
+export function clubForRemaining(round: Round, playerId: string, remaining: number): Club | "chip" {
+  if (remaining < 30) return "chip";
+  const bag = bagAverages(round.shots ?? [], playerId);
+  let best: Club = "Dr", bestDiff = Infinity;
+  for (const c of CLUBS) { const diff = Math.abs((bag[c]?.avg ?? DEFAULT_CARRY[c]) - remaining); if (diff < bestDiff) { best = c; bestDiff = diff; } }
+  return best;
+}
 /** Where the player intends the next shot to finish; recorded on that shot when it is logged. */
 export function setPendingAim(state: State, roundId: string, playerId: string, holeNumber: number, aim: Pt | null) {
   state.pendingAims ??= {};
@@ -443,6 +499,7 @@ export function moveShotRest(state: State, roundId: string, shotId: string, to: 
   // If the player never overrode the suggested club, re-suggest for the new distance.
   const others = (round.shots ?? []).filter((x) => x.id !== shot.id);
   if (shot.club === suggestClub(shot.distance, others, shot.playerId)) shot.club = suggestClub(distance, others, shot.playerId);
+  if (shot.lie === null || shot.lie === autoLie(state, round, shot.holeNumber, shot.to)) shot.lie = autoLie(state, round, shot.holeNumber, to);
   // Later shots keep their own distances: shift their rest points by the same amount.
   const delta = { u: to.u - shot.to.u, v: to.v - shot.to.v };
   for (const later of holeShots(round, shot.playerId, shot.holeNumber)) {
@@ -478,15 +535,26 @@ export function undoShot(state: State, roundId: string, playerId: string, holeNu
 function resyncTrackedScore(state: State, roundId: string, playerId: string, holeNumber: number) {
   const round = state.rounds.find((r) => r.id === roundId)!;
   const existing = findScore(round, playerId, holeNumber);
-  if (existing.version === 0 || existing.entry.putts === null) return;
-  const gross = holeShots(round, playerId, holeNumber).length + existing.entry.putts + existing.entry.penaltyStrokes;
-  if (gross !== existing.entry.grossScore) saveScore(state, roundId, playerId, holeNumber, { grossScore: gross }, existing.version);
+  const all = holeShots(round, playerId, holeNumber);
+  const putts = all.filter(isPutt);
+  const strokes = all.length - putts.length;
+  const pen = existing.entry.penaltyStrokes;
+  let patch: Partial<HoleEntry>;
+  if (putts.length > 0) {
+    // Tracked putts own the putt count; the hole is scored once the last putt dropped.
+    const holed = all[all.length - 1]?.holed === true;
+    patch = holed ? { grossScore: strokes + putts.length + pen, putts: putts.length } : { grossScore: null, putts: null };
+  } else if (existing.version > 0 && existing.entry.putts !== null) {
+    patch = { grossScore: strokes + existing.entry.putts + pen };
+  } else return;
+  if (patch.grossScore === existing.entry.grossScore && (patch.putts === undefined || patch.putts === existing.entry.putts)) return;
+  saveScore(state, roundId, playerId, holeNumber, patch, existing.version);
 }
 export function holeOut(state: State, roundId: string, playerId: string, holeNumber: number, putts: number): SaveResult {
   const round = state.rounds.find((r) => r.id === roundId)!;
-  const shots = holeShots(round, playerId, holeNumber);
+  const strokes = holeShots(round, playerId, holeNumber).filter((s) => !isPutt(s)).length;
   const existing = findScore(round, playerId, holeNumber);
-  const gross = shots.length + putts + existing.entry.penaltyStrokes;
+  const gross = strokes + putts + existing.entry.penaltyStrokes;
   return saveScore(state, roundId, playerId, holeNumber, { grossScore: gross, putts }, existing.version);
 }
 export type { Club, Shape, Trajectory, Lie };

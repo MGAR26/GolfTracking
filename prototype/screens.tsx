@@ -3,10 +3,10 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, deleteShot, groupMates, holeOut, holeShots, logShot, moveShotRest, pendingAim, replaceHoleShots, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShots, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
-import { buildHole } from "./holeGeometry";
+import { buildHole, dist } from "./holeGeometry";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
   SEED_HOLES, liveMoney, setScorecardView, type ScorecardView, type Snapshot,
@@ -606,6 +606,11 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           penalties={findScore(snap.round, me!.playerId, holeNumber).entry.penaltyStrokes}
           putts={findScore(snap.round, me!.playerId, holeNumber).entry.putts}
           gross={findScore(snap.round, me!.playerId, holeNumber).entry.grossScore}
+          remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c)}
+          flag={buildHole(hole.holeNumber, hole.par, hole.yardage).green.c}
+          suggested={clubForRemaining(snap.round, me!.playerId, dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, pendingAim(state, roundId, me!.playerId, holeNumber) ?? buildHole(hole.holeNumber, hole.par, hole.yardage).green.c))}
+          onMark={(club) => withUndo((s) => { markBall(s, roundId, s.actorId, holeNumber, club); })}
+          onPutt={(leaveFt) => withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, leaveFt); })}
           onUpdate={(id, patch) => withUndo((s) => updateShot(s, roundId, id, patch))}
           onUndo={doUndo}
           onRedo={doRedo}

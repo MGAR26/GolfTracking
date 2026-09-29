@@ -13,7 +13,7 @@ const W = 400, H = 300, CX = 200;
 // "You" sit near the bottom of the frame and the flag lands near the top, whatever is left to play.
 // Inside 250 yards the camera climbs (further back, horizon further above the frame) so the green
 // has real depth on screen and an aim point can be placed accurately.
-const NEAR_Y = 272, FLAG_Y = 100;
+const NEAR_Y = 286, FLAG_Y = 74;
 
 interface View {
   toView: (p: Pt) => Pt;
@@ -228,7 +228,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             const len = (view.overhead ? 2.2 : 3.6) * Math.min(1, c.pct / 3);
             const a = view.project(c.c), b = view.project({ u: c.c.u + c.du * len, v: c.c.v + c.dv * len });
             const ang = Math.atan2(b.y - a.y, b.x - a.x);
-            return <g key={i} opacity={0.75}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#1b2a41" strokeWidth={1} /><path d={`M${b.x} ${b.y} L${b.x - 3.2 * Math.cos(ang - 0.5)} ${b.y - 3.2 * Math.sin(ang - 0.5)} L${b.x - 3.2 * Math.cos(ang + 0.5)} ${b.y - 3.2 * Math.sin(ang + 0.5)} Z`} fill="#1b2a41" /></g>;
+            const hd = view.overhead ? 4.2 : 5;
+            const head = `M${b.x} ${b.y} L${b.x - hd * Math.cos(ang - 0.55)} ${b.y - hd * Math.sin(ang - 0.55)} L${b.x - hd * Math.cos(ang + 0.55)} ${b.y - hd * Math.sin(ang + 0.55)} Z`;
+            return <g key={i}><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#f7f3ea" strokeWidth={3} strokeLinecap="round" opacity={0.8} /><path d={head} fill="#f7f3ea" stroke="#f7f3ea" strokeWidth={2} strokeLinejoin="round" opacity={0.8} /><line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#1b2a41" strokeWidth={1.3} strokeLinecap="round" /><path d={head} fill="#1b2a41" /></g>;
           })}
           {trees.map((t, i) => { const q = view.project(t); const r = Math.min(26, 4.5 * q.s); return <g key={i}><ellipse cx={q.x + r * 0.3} cy={q.y + r * 0.2} rx={r * 1.1} ry={r * 0.4} fill="rgba(0,0,0,0.18)" /><circle cx={q.x} cy={q.y - r * 0.6} r={r} fill="#3f6a3c" /><circle cx={q.x - r * 0.3} cy={q.y - r * 0.9} r={r * 0.55} fill="#4f7d48" /></g>; })}
           {/* tee box */}
@@ -259,7 +261,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <g key={sh.id}>
                 {ahead(sh.from) && <path d={linePath(view, sh.from, sh.to)} stroke="#b08d3c" strokeWidth={1.6} fill="none" />}
                 {am && <><circle cx={am.x} cy={am.y} r={3.5} fill="none" stroke="#f7f3ea" strokeWidth={1.2} strokeDasharray="2 1.5" /><line x1={am.x} y1={am.y} x2={b.x} y2={b.y} stroke="#f7f3ea" strokeWidth={0.8} opacity={0.7} /></>}
-                {ahead(sh.to) && <><circle cx={b.x} cy={b.y} r={3.2} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1} />{tracking && <circle cx={b.x} cy={b.y} r={14} fill="transparent" {...grab} onPointerDown={startDrag("shot", sh.id)} data-testid={`shot-handle-${sh.seq}`} aria-label={`Drag shot ${sh.seq}`} />}<text x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2} {...label}>{sh.club === "chip" ? "chip" : sh.club} {Math.round(sh.distance)}</text></>}
+                {ahead(sh.to) && <><circle cx={b.x} cy={b.y} r={3.2} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1} />{tracking && <circle cx={b.x} cy={b.y} r={14} fill="transparent" {...grab} onPointerDown={startDrag("shot", sh.id)} data-testid={`shot-handle-${sh.seq}`} aria-label={`Drag shot ${sh.seq}`} />}<text x={(a.x + b.x) / 2 + 4} y={(a.y + b.y) / 2} {...label}>{sh.club === "putt" ? `${Math.round(dist(sh.from, flag) * 3)} ft` : `${sh.club} ${Math.round(sh.distance)}`}</text></>}
               </g>
             );
           })}

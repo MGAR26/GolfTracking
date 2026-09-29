@@ -1,19 +1,25 @@
 import { useState } from "react";
 import { Card } from "./ui";
 import { bagAverages, CLUBS, DEFAULT_CARRY, dispersion, missFromAim, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
-import type { Pt } from "./holeGeometry";
+import { dist, type Pt } from "./holeGeometry";
 
-const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "Dr" ? "Driver" : c);
+const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "putt" ? "Putt" : c === "Dr" ? "Driver" : c);
 
 const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null; const lat = Math.round(Math.abs(m.lateral)), lng = Math.round(Math.abs(m.long)); return `${lat ? `${lat} ${m.lateral > 0 ? "R" : "L"}` : "on line"}${lng ? `, ${lng} ${m.long > 0 ? "long" : "short"}` : ""}`; };
 
-export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
+export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
   shots: Shot[]; tracking: boolean; onToggle: () => void; selectedId: string | null; onSelect: (id: string | null) => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
+  /** Yards from the ball to the pin, and the club that fits it. */
+  remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void;
   onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onHoleOut: (putts: number) => void;
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
 }) {
   const setSelectedId = onSelect;
   const [typed, setTyped] = useState("");
+  const [showTyped, setShowTyped] = useState(false);
+  // Club for the next shot: the suggestion unless the player picked one for this exact shot.
+  const [pick, setPick] = useState<{ forShot: number; club: Shot["club"] } | null>(null);
+  const club = pick?.forShot === shots.length ? pick.club : suggested;
   // Draft text for the distance field so the user can clear it and retype without it snapping back.
   const [draft, setDraft] = useState<{ id: string; text: string } | null>(null);
   const commitDraft = () => {
@@ -23,40 +29,76 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
     setDraft(null);
   };
   const last = shots[shots.length - 1];
-  // Edit the shot you tapped; otherwise the newest one.
-  const editing = shots.find((s) => s.id === selectedId) ?? last;
+  const holed = !!last?.holed;
+  const onGreen = !holed && !!last && last.lie === "green";
+  const puttShots = shots.filter((s) => s.club === "putt");
+  const strokes = shots.length - puttShots.length;
+  const ft = Math.round(remaining * 3);
+  const editing = selectedId ? shots.find((s) => s.id === selectedId) ?? null : null;
+  const seg = (v: string) => <span className="text-muted">{v}</span>;
   return (
     <Card title={`${playerName} · shot tracking`} action={<button type="button" className={`btn !min-h-8 text-xs whitespace-nowrap ${tracking ? "btn-primary" : "btn-secondary"}`} onClick={onToggle} data-testid="track-toggle">{tracking ? "Tracking on" : "Track shots"}</button>} className={tracking ? "!border-brass" : ""}>
-      {!tracking && shots.length === 0 && <p className="text-sm text-muted">Turn on tracking, then mark where each shot comes to rest (GPS on the course; here, type a distance or tap the hole). The score fills itself in from shots + putts + penalties.</p>}
+      {!tracking && shots.length === 0 && <p className="text-sm text-muted">One tap per shot: when you reach your ball, press <b>Mark ball</b>. GPS records where it is, the club and distance fill in, and your score is shots + putts. No typing.</p>}
+      {tracking && (
+        <div className="flex flex-col gap-2" data-testid="track-flow">
+          <p className="text-sm" data-testid="track-status">
+            {holed ? <><b>Holed out</b> {seg(`· ${strokes} shot${strokes === 1 ? "" : "s"} + ${puttShots.length} putt${puttShots.length === 1 ? "" : "s"}`)}</> : onGreen ? <><b>{puttShots.length ? `Putt ${puttShots.length + 1}` : "On the green"}</b> {seg(`· ${ft} ft to the hole`)}</> : <><b>Shot {shots.length + 1}</b> {seg(`· ${Math.round(remaining)} to the pin`)}{last?.lie ? seg(` · from the ${last.lie}`) : seg(" · from the tee")}</>}
+          </p>
+          {!onGreen && !holed && (
+            <>
+              <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-0.5" aria-label="Club for this shot">
+                {(["chip", ...CLUBS] as Shot["club"][]).map((c) => (
+                  <button key={c} type="button" aria-pressed={club === c} onClick={() => setPick({ forShot: shots.length, club: c })} className={`tap !min-h-8 shrink-0 rounded-full px-2.5 text-xs font-semibold border ${club === c ? "bg-ink text-[var(--bg)] border-ink" : c === suggested ? "bg-brass-soft border-brass" : "bg-surface border-line-strong"}`}>{clubLabel(c)}</button>
+                ))}
+              </div>
+              <div className="flex items-stretch gap-2">
+                <button type="button" className="btn btn-primary flex-1 !min-h-12 text-base" onClick={() => { onMark(club); setSelectedId(null); }} data-testid="mark-ball">
+                  Mark ball <span className="font-normal opacity-80 text-sm">· {clubLabel(club)}</span>
+                </button>
+                <button type="button" aria-pressed={aimMode} onClick={onAimMode} className={`btn !min-h-12 text-sm whitespace-nowrap ${aimMode ? "btn-primary" : "btn-secondary"}`} data-testid="aim-toggle">{aimMode ? "Tap hole…" : aim ? "Aim ✓" : "Aim"}</button>
+              </div>
+              <p className="text-[11px] text-muted">
+                On the course GPS marks the spot when you press it. In this demo it drops the ball down the line for the club;{" "}
+                <button type="button" className="text-accent font-semibold" onClick={() => setShowTyped((v) => !v)}>type yards</button> or tap the picture to be exact.
+                {aim && !aimMode && <> · aim set <button type="button" className="text-accent font-semibold" onClick={onClearAim}>clear</button></>}
+              </p>
+              {showTyped && (
+                <form className="flex items-center gap-2 text-sm" onSubmit={(e) => { e.preventDefault(); const n = Number(typed); if (n > 0) { onAddDistance(n); setTyped(""); setSelectedId(null); } }} data-testid="add-by-distance">
+                  <input className="field !min-h-9 w-24" inputMode="numeric" placeholder="yards" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Shot distance in yards" autoFocus />
+                  <button type="submit" className="btn btn-secondary !min-h-9 text-xs" disabled={!(Number(typed) > 0)}>Add</button>
+                </form>
+              )}
+            </>
+          )}
+          {onGreen && (
+            <div className="flex flex-col gap-2" data-testid="putt-flow">
+              <button type="button" className="btn btn-primary !min-h-12 text-base" onClick={() => onPutt(null)} data-testid="holed-it">Holed it <span className="font-normal opacity-80 text-sm">· {ft} ft putt</span></button>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted whitespace-nowrap">Missed · ft left</span>
+                <div className="seg flex-1">{[1, 3, 6, 10, 20].map((n) => <button key={n} type="button" onClick={() => onPutt(n)} className="!min-h-10 !px-1" aria-label={`Missed, ${n} feet left`}>{n}</button>)}</div>
+              </div>
+              <p className="text-[11px] text-muted">
+                First putt length comes from where the ball sits; each miss you just say what&apos;s left.
+                {puttShots.length === 0 && <> Or skip the detail and enter putts: {[1, 2, 3, 4].map((n) => <button key={n} type="button" className="text-accent font-semibold px-1" onClick={() => onHoleOut(n)} aria-label={`Holed out in ${n} putts`}>{n}</button>)}</>}
+                {" "}<button type="button" className="text-accent font-semibold" onClick={() => onUpdate(last.id, { lie: "fringe" })}>Not on the green?</button>
+              </p>
+            </div>
+          )}
+          {holed && <p className="text-[11px] text-muted">Wrong? Undo the last putt or remove a row below.</p>}
+        </div>
+      )}
       {shots.length > 0 && (
-        <ol className="divide-y divide-line text-sm" data-testid="shot-list">
+        <ol className={`divide-y divide-line text-sm ${tracking ? "mt-3 border-t border-line" : ""}`} data-testid="shot-list">
           {shots.map((sh) => (
             <li key={sh.id} className={`flex items-center gap-1 rounded-md -mx-1 ${tracking && editing?.id === sh.id ? "bg-brass-soft" : ""}`}>
-              <button type="button" onClick={() => setSelectedId(sh.id === editing?.id && selectedId ? null : sh.id)} className="flex-1 min-w-0 text-left py-1.5 flex items-center justify-between gap-2 px-1" aria-label={`Edit shot ${sh.seq}`}>
-                <span><span className="text-muted mr-1">{sh.seq}.</span><span className="font-semibold">{clubLabel(sh.club)}</span> <span className="text-ink-2">{Math.round(sh.distance)} yds</span>{sh.shape || sh.trajectory ? <span className="text-muted"> · {[sh.trajectory, sh.shape].filter(Boolean).join(" ")}</span> : null}{sh.lie ? <span className="text-muted"> → {sh.lie}</span> : null}{sh.aim ? <span className="text-brass"> · miss {missText(sh)}</span> : null}</span>
-                {tracking && <span className="text-[11px] font-semibold text-accent">{editing?.id === sh.id ? "editing" : "edit"}</span>}
+              <button type="button" onClick={() => setSelectedId(sh.id === selectedId ? null : sh.id)} className="flex-1 min-w-0 text-left py-1.5 flex items-center justify-between gap-2 px-1" aria-label={`Edit shot ${sh.seq}`}>
+                <span className="truncate"><span className="text-muted mr-1">{sh.seq}.</span><span className="font-semibold">{clubLabel(sh.club)}</span> <span className="text-ink-2">{sh.club === "putt" ? `${Math.round(dist(sh.from, flag) * 3)} ft` : Math.round(sh.distance)}</span>{sh.club === "putt" ? <span className="text-muted">{sh.holed ? " · holed" : ` → ${Math.round(dist(sh.to, flag) * 3)} ft left`}</span> : sh.lie ? <span className="text-muted"> → {sh.lie}</span> : null}{sh.shape || sh.trajectory ? <span className="text-muted"> · {[sh.trajectory, sh.shape].filter(Boolean).join(" ")}</span> : null}{sh.aim ? <span className="text-brass"> · {missText(sh)}</span> : null}</span>
+                {tracking && <span className="text-[11px] font-semibold text-accent shrink-0">{editing?.id === sh.id ? "done" : "edit"}</span>}
               </button>
               {tracking && <button type="button" className="tap !min-h-8 !min-w-8 rounded-md text-muted hover:text-neg text-lg leading-none" aria-label={`Remove shot ${sh.seq}`} onClick={() => { onDelete(sh.id); if (selectedId === sh.id) setSelectedId(null); }}>×</button>}
             </li>
           ))}
         </ol>
-      )}
-      {tracking && (
-        <div className="mt-2 flex items-center gap-2 text-sm" data-testid="aim-row">
-          <span className="text-muted whitespace-nowrap">Next shot</span>
-          <button type="button" aria-pressed={aimMode} onClick={onAimMode} className={`btn !min-h-9 text-xs whitespace-nowrap ${aimMode ? "btn-primary" : "btn-secondary"}`} data-testid="aim-toggle">{aimMode ? "Tap the hole…" : aim ? "Move aim" : "Set aim"}</button>
-          {aim && !aimMode && <span className="text-[11px] text-ink-2">Aim set · the miss is recorded when you mark the shot</span>}
-          {aim && !aimMode && <button type="button" className="text-xs font-semibold text-accent" onClick={onClearAim}>Clear</button>}
-          {!aim && !aimMode && <span className="text-[11px] text-muted">Optional. Personalizes your dispersion.</span>}
-        </div>
-      )}
-      {tracking && (
-        <form className="mt-2 flex items-center gap-2 text-sm" onSubmit={(e) => { e.preventDefault(); const n = Number(typed); if (n > 0) { onAddDistance(n); setTyped(""); setSelectedId(null); } }} data-testid="add-by-distance">
-          <span className="text-muted whitespace-nowrap">Add shot</span>
-          <input className="field !min-h-9 w-24" inputMode="numeric" placeholder="yards" value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Shot distance in yards" />
-          <button type="submit" className="btn btn-secondary !min-h-9 text-xs" disabled={!(Number(typed) > 0)}>Add</button>
-          <span className="text-[11px] text-muted whitespace-nowrap">or tap hole</span>
-        </form>
       )}
       {tracking && editing && (
         <div className="mt-2 flex flex-col gap-2 rounded-lg bg-surface-2/50 p-2" data-testid="shot-editor">
@@ -79,39 +121,33 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
               <button type="button" className="tap !min-h-8 text-xs font-semibold text-neg ml-1" onClick={() => { onDelete(editing.id); setSelectedId(null); }}>Delete</button>
             </div>
           </div>
-          <div>
-            <span className="label">Club <span className="normal-case font-normal text-muted">(suggested {clubLabel(editing.club)})</span></span>
+          {editing.club !== "putt" && <div>
+            <span className="label">Club</span>
             <div className="flex flex-wrap gap-1">
               {(["chip", ...CLUBS] as Shot["club"][]).map((c) => (
                 <button key={c} type="button" aria-pressed={editing.club === c} onClick={() => onUpdate(editing.id, { club: c })} className={`tap !min-h-8 rounded-full px-2.5 text-xs font-semibold border ${editing.club === c ? "bg-ink text-[var(--bg)] border-ink" : "bg-surface border-line-strong"}`}>{clubLabel(c)}</button>
               ))}
             </div>
-          </div>
+          </div>}
           <div className="grid grid-cols-2 gap-2">
             <div><span className="label">Shape</span><div className="seg">{(["draw", "straight", "fade"] as Shape[]).map((v) => <button key={v} type="button" aria-pressed={editing.shape === v} onClick={() => onUpdate(editing.id, { shape: editing.shape === v ? null : v })} className="!text-xs !min-h-8">{v}</button>)}</div></div>
             <div><span className="label">Flight</span><div className="seg">{(["low", "normal", "high"] as Trajectory[]).map((v) => <button key={v} type="button" aria-pressed={editing.trajectory === v} onClick={() => onUpdate(editing.id, { trajectory: editing.trajectory === v ? null : v })} className="!text-xs !min-h-8">{v}</button>)}</div></div>
           </div>
-          <div><span className="label">Ended up</span><div className="seg">{(["fairway", "rough", "sand", "fringe", "green"] as Lie[]).map((v) => <button key={v} type="button" aria-pressed={editing.lie === v} onClick={() => onUpdate(editing.id, { lie: editing.lie === v ? null : v })} className="!text-xs !min-h-8">{v}</button>)}</div></div>
+          <div><span className="label">Ended up <span className="normal-case font-normal text-muted">(read from the map; fix it if wrong)</span></span><div className="seg">{(["fairway", "rough", "sand", "fringe", "green"] as Lie[]).map((v) => <button key={v} type="button" aria-pressed={editing.lie === v} onClick={() => onUpdate(editing.id, { lie: v })} className="!text-xs !min-h-8">{v}</button>)}</div></div>
         </div>
       )}
       {tracking && (
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="text-muted">Holed out · putts</span>
-            <div className="seg">{[0, 1, 2, 3].map((n) => <button key={n} type="button" aria-pressed={putts === n || (n === 3 && (putts ?? 0) > 3)} onClick={() => onHoleOut(n === 3 && (putts ?? 0) >= 3 ? (putts ?? 3) + 1 : n)} className="!min-h-9 !px-3" aria-label={`Holed out in ${n} putts`}>{n === 3 ? ((putts ?? 0) > 3 ? String(putts) : "3+") : n}</button>)}</div>
-          </div>
-          <div className="flex items-center gap-1">
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <p className="text-[11px] text-muted" data-testid="derived-score">
+            {putts === null
+              ? `Score so far: ${strokes} shot${strokes === 1 ? "" : "s"}${puttShots.length ? ` + ${puttShots.length} putt${puttShots.length === 1 ? "" : "s"}` : ""}${penalties ? ` + ${penalties} penalty` : ""} … (par ${par}).`
+              : `${strokes} shot${strokes === 1 ? "" : "s"} + ${putts} putt${putts === 1 ? "" : "s"}${penalties ? ` + ${penalties} penalty` : ""} = ${gross ?? strokes + putts + penalties} · on your card (par ${par}).`}
+          </p>
+          <div className="flex items-center gap-1 shrink-0">
             <button type="button" className="btn btn-secondary !min-h-8 !px-2.5 text-xs" onClick={onUndo} disabled={!canUndo} aria-label="Undo">↶ Undo</button>
             <button type="button" className="btn btn-secondary !min-h-8 !px-2.5 text-xs" onClick={onRedo} disabled={!canRedo} aria-label="Redo">↷</button>
           </div>
         </div>
-      )}
-      {tracking && (
-        <p className="mt-2 text-[11px] text-muted" data-testid="derived-score">
-          {putts === null
-            ? `Score will be ${shots.length} shot${shots.length === 1 ? "" : "s"} + putts${penalties ? ` + ${penalties} penalty` : ""} (par ${par}). Tap your putt count when you hole out.`
-            : `${shots.length} shot${shots.length === 1 ? "" : "s"} + ${putts} putt${putts === 1 ? "" : "s"}${penalties ? ` + ${penalties} penalty` : ""} = ${gross ?? shots.length + putts + penalties} · written to your card below (par ${par}).`}
-        </p>
       )}
     </Card>
   );

@@ -50,6 +50,23 @@ export function snapToGreen(e: Ellipse, p: Pt, margin: number): Pt {
   if (Math.hypot(p.u - edge.u, p.v - edge.v) > margin) return p;
   return { u: e.c.u + (p.u - e.c.u) * edgeR * 0.9, v: e.c.v + (p.v - e.c.v) * edgeR * 0.9 };
 }
+function pointInPolygon(pts: Pt[], p: Pt): boolean {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const a = pts[i], b = pts[j];
+    if (a.v > p.v !== b.v > p.v && p.u < ((b.u - a.u) * (p.v - a.v)) / (b.v - a.v) + a.u) inside = !inside;
+  }
+  return inside;
+}
+/** What the ball is sitting in at a point, from the hole's drawn geometry (GPS + course map in the app). */
+export function lieAt(hole: HoleShape, p: Pt): "tee" | "green" | "sand" | "water" | "fairway" | "rough" {
+  if (p.u < 6 && Math.abs(p.v) < 8) return "tee";
+  if (ellipseRadial(hole.green, p) <= 1) return "green";
+  if (hole.bunkers.some((b) => ellipseRadial(b, p) <= 1)) return "sand";
+  if (hole.water && pointInPolygon(hole.water, p)) return "water";
+  if (hole.fairway.length && pointInPolygon(hole.fairway, p)) return "fairway";
+  return "rough";
+}
 export function ellipsePath(e: Ellipse, steps = 28): Pt[] {
   return Array.from({ length: steps }, (_, i) => ellipsePoint(e, (i / steps) * Math.PI * 2));
 }

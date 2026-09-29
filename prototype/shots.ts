@@ -16,7 +16,7 @@ export interface Shot {
   playerId: string;
   holeNumber: number;
   seq: number;
-  club: Club | "chip";
+  club: Club | "chip" | "putt";
   from: Pt;
   to: Pt;
   distance: number;
@@ -25,7 +25,10 @@ export interface Shot {
   lie: Lie | null;
   /** Where the player intended the ball to finish, set before the shot. */
   aim?: Pt | null;
+  /** A putt that dropped: the hole is complete at this shot. */
+  holed?: boolean;
 }
+export const isPutt = (s: Shot) => s.club === "putt";
 
 /** Miss relative to the aim point: lateral (+ right of the line from→aim) and long (+ past the aim). */
 export function missFromAim(shot: Shot): { lateral: number; long: number } | null {
@@ -40,7 +43,7 @@ export function missFromAim(shot: Shot): { lateral: number; long: number } | nul
 }
 
 /** Average miss per club from shots that had an aim point. */
-export function dispersion(shots: Shot[], playerId: string, club: Club | "chip"): { n: number; lateral: number; long: number; absLateral: number } | null {
+export function dispersion(shots: Shot[], playerId: string, club: Club | "chip" | "putt"): { n: number; lateral: number; long: number; absLateral: number } | null {
   const ms = shots.filter((s) => s.playerId === playerId && s.club === club).map(missFromAim).filter((m): m is { lateral: number; long: number } => m !== null);
   if (ms.length === 0) return null;
   const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
