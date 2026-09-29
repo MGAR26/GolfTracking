@@ -200,6 +200,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const you = view.project(pos);
   const fl = view.project(flag);
   const hazards = hazardDistances(pos, flag, hole).slice(0, 4);
+  const fallScreen = (() => { const a = view.project(flag), b = view.project({ u: flag.u + cond.tilt.u * 5, v: flag.v + cond.tilt.v * 5 }); return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90; })();
   const pl = playsLike(pos, flag, hole.length, cond, wind);
   // Wind arrow relative to the view: 0° = up the screen (the direction you're facing).
   const shotBearing = pl.shotBearingDeg;
@@ -257,6 +258,19 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               </g>
             );
           }))}
+          {/* hazard yardages from where you stand, sitting on the hazard itself */}
+          {hazards.filter((h) => ahead(h.at)).map((h, i) => {
+            const q = view.project(h.at);
+            const fill = h.kind === "water" ? "#4d7fa6" : h.kind === "bunker" ? "#b8a05a" : "#2f5230";
+            const text = h.kind === "trees" ? `${Math.round(h.to)}` : `${Math.round(h.to)}–${Math.round(h.carry)}`;
+            const w = text.length * 5.2 + 8;
+            // overlays: hole label top-left (x<165, y<58) and the info column top-right (x>272, y<128)
+            let x = q.x;
+            if (q.y < 128 && q.x + w / 2 > 270) x = 270 - w / 2 - 2;
+            if (q.y < 58 && q.x - w / 2 < 165) x = 165 + w / 2 + 2;
+            q.x = x;
+            return <g key={i} data-testid="hazard-label"><rect x={q.x - w / 2} y={q.y - 7} width={w} height={13} rx={3.5} fill={fill} opacity={0.92} /><text x={q.x} y={q.y + 3} textAnchor="middle" fontSize={8.5} fontWeight={700} fill="#f7f3ea">{text}</text></g>;
+          })}
           {/* logged shots, with their aim point and miss when one was set */}
           {shots.map((sh) => {
             const a = view.project(sh.from), b = view.project(sh.to);
@@ -297,21 +311,27 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
         <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
           <div className="flex gap-1" aria-label="Distances to green">
             {(["front", "middle", "back"] as const).map((k) => (
-              <div key={k} className={`rounded-lg px-2 py-1 text-center leading-none ${k === "middle" ? "bg-[var(--bg)] text-ink" : "bg-ink/85 text-[var(--bg)]"}`}>
-                <div className="text-[9px] uppercase tracking-wide opacity-80">{k[0]}</div>
-                <div className="font-display text-lg" data-testid={`dist-${k}`}>{Math.round(d[k])}</div>
+              <div key={k} className={`rounded-lg w-9 py-1 text-center leading-none ${k === "middle" ? "bg-[var(--bg)] text-ink" : "bg-ink/85 text-[var(--bg)]"}`}>
+                <div className="text-[8px] uppercase tracking-wide opacity-80">{k[0]}</div>
+                <div className="font-display text-base" data-testid={`dist-${k}`}>{Math.round(d[k])}</div>
               </div>
             ))}
           </div>
-          <div className="rounded-lg bg-brass px-2 py-1 leading-none text-ink flex items-baseline gap-1.5" data-testid="plays-like">
-            <span className="text-[9px] uppercase tracking-wide font-semibold">Plays like</span>
-            <span className="font-display text-lg">{Math.round(pl.playsLike)}</span>
+          <div className="flex gap-1">
+            <button type="button" onClick={() => setEditWind((e) => !e)} className="rounded-lg bg-ink/85 text-[var(--bg)] w-[56px] py-1 flex items-center justify-center gap-1 leading-none" aria-label="Wind" data-testid="wind-chip">
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.5" /><g transform={`rotate(${windRel} 12 12)`}><path d="M12 4 L15.5 12 L12 10.2 L8.5 12 Z" fill="#b08d3c" /><line x1="12" y1="10" x2="12" y2="20" stroke="#b08d3c" strokeWidth="2" strokeLinecap="round" /></g></svg>
+              <span className="text-[10px] font-semibold">{wind.mph}</span>
+            </button>
+            <div className="rounded-lg bg-ink/85 text-[var(--bg)] w-[56px] py-1 flex items-center justify-center gap-1 leading-none" aria-label={`Green falls ${tiltWords(cond.tilt)}, ${cond.tilt.pct} percent`} data-testid="slope-chip">
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.5" /><g transform={`rotate(${fallScreen} 12 12)`}><path d="M12 4 L15.5 12 L12 10.2 L8.5 12 Z" fill="#9cc873" /><line x1="12" y1="10" x2="12" y2="20" stroke="#9cc873" strokeWidth="2" strokeLinecap="round" /></g></svg>
+              <span className="text-[10px] font-semibold">{cond.tilt.pct}%</span>
+            </div>
+          </div>
+          <div className="rounded-lg bg-brass w-[116px] py-1 leading-none text-ink flex items-baseline justify-center gap-1.5" data-testid="plays-like">
+            <span className="text-[8px] uppercase tracking-wide font-semibold">Plays like</span>
+            <span className="font-display text-base">{Math.round(pl.playsLike)}</span>
           </div>
         </div>
-        {!aimMode && <button type="button" onClick={() => setEditWind((e) => !e)} className="absolute left-2 bottom-2 rounded-lg bg-ink/85 text-[var(--bg)] px-2 py-1 flex items-center gap-1.5 leading-none" aria-label="Wind">
-          <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1" opacity="0.5" /><g transform={`rotate(${windRel} 12 12)`}><path d="M12 4 L15.5 12 L12 10.2 L8.5 12 Z" fill="#b08d3c" /><line x1="12" y1="10" x2="12" y2="20" stroke="#b08d3c" strokeWidth="2" strokeLinecap="round" /></g></svg>
-          <span className="text-[10px] font-semibold">{wind.mph} mph from {compassName(wind.fromDeg)}</span>
-        </button>}
         {aimMode && <div className="absolute bottom-3 left-2 pointer-events-none"><span className="rounded-md bg-brass px-3 py-1 text-[11px] font-semibold text-ink">Tap where you&apos;re aiming</span></div>}
         <button type="button" onClick={onAimButton} aria-pressed={aimMode} data-testid="aim-fab" className={`absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-2 text-xs font-semibold shadow-lg ${aimMode ? "bg-brass text-ink" : aim ? "bg-[var(--bg)] text-ink" : "bg-ink/85 text-[var(--bg)]"}`} aria-label={aimMode ? "Cancel aiming" : aim ? "Move aim point" : "Set aim point"}>
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" /><line x1="12" y1="1" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="1" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="23" y2="12" /></svg>
@@ -323,7 +343,6 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           <span className="font-semibold text-ink">Plays like {Math.round(pl.playsLike)} to the middle</span>
           <span className="text-ink-2">{Math.abs(pl.elevationRemainingFt) < 2 ? "level" : `${Math.round(Math.abs(pl.elevationRemainingFt))} ft ${pl.elevationRemainingFt > 0 ? "uphill" : "downhill"}`} {fmtAdj(pl.elevationAdj)}</span>
           <span className="text-ink-2">{Math.abs(pl.headwindMph) < 1 ? "no wind along the shot" : `${Math.round(Math.abs(pl.headwindMph))} mph ${pl.headwindMph > 0 ? "into" : "helping"}`} {fmtAdj(pl.windAdj)}{Math.abs(pl.crosswindMph) >= 3 ? ` · ${Math.round(Math.abs(pl.crosswindMph))} mph across ${pl.crosswindMph > 0 ? "L→R" : "R→L"}` : ""}</span>
-          <span className="text-ink-2">Green falls {tiltWords(cond.tilt)} · {cond.tilt.pct}%</span>
         </div>
         {editWind && (
           <div className="rounded-lg bg-surface-2/70 p-2 flex flex-col gap-2 text-[11px]">
@@ -331,18 +350,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             <div className="flex items-center gap-2"><span className="w-16 text-muted">From</span>
               <div className="seg flex-1">{["N", "NE", "E", "SE", "S", "SW", "W", "NW"].map((n, i) => <button key={n} type="button" aria-pressed={compassName(wind.fromDeg) === n} onClick={() => onWindChange({ ...wind, fromDeg: i * 45 })} className="!min-h-8 !text-[11px]">{n}</button>)}</div>
             </div>
-            <span className="text-muted">The app reads the hourly forecast for the course; adjust here to see the effect. Hole {holeNumber} plays toward {compassName(cond.bearingDeg)}.</span>
+            <span className="text-muted">Wind from {compassName(wind.fromDeg)}. The app reads the hourly forecast for the course; adjust here to see the effect. Hole {holeNumber} plays toward {compassName(cond.bearingDeg)}. Green falls {tiltWords(cond.tilt)}.</span>
           </div>
         )}
-        <div className="flex flex-wrap gap-1.5" aria-label="Hazards in play">
-          {hazards.length === 0 && <span className="text-[11px] text-muted">Nothing in play between you and the green.</span>}
-          {hazards.map((h, i) => (
-            <span key={i} className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-2 py-1 text-[11px] font-semibold text-ink" data-testid="hazard-chip">
-              <span className={`inline-block h-2 w-2 rounded-sm ${h.kind === "water" ? "bg-[#6d9fc4]" : h.kind === "bunker" ? "bg-[#e0d09c]" : "bg-[#3f6a3c]"}`} />
-              {h.kind === "bunker" ? "Bunker" : h.kind === "water" ? "Water" : "Trees"} {h.side} · {Math.round(h.to)}{h.kind !== "trees" && <span className="text-muted font-normal">–{Math.round(h.carry)}</span>}
-            </span>
-          ))}
-        </div>
         <div className="flex items-center justify-between gap-2 text-[11px]">
           <div className="flex flex-wrap gap-1.5 items-center">
             <span className="text-muted">Your numbers:</span>
