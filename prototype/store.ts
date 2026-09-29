@@ -30,7 +30,8 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView }
+export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
 
@@ -103,6 +104,11 @@ export function groupMates(round: Round, playerId: string): string[] {
   return g ? g.playerIds : round.players.map((p) => p.playerId);
 }
 export function setShotFilter(state: State, filter: ShotFilter) { state.shotFilter = filter; }
+export function setScorecardView(state: State, view: ScorecardView) { state.scorecardView = view; }
+/** Money up or down so far this round: projected game settlements as if it ended now. */
+export function liveMoney(snap: Snapshot, playerId: string): number {
+  return snap.games.flatMap((g) => g.settlements).reduce((a, st) => a + (st.toPlayerId === playerId ? st.amountCents : 0) - (st.fromPlayerId === playerId ? st.amountCents : 0), 0);
+}
 
 /* ---------- trips ---------- */
 export function createTrip(state: State, input: { name: string; destination: string; startDate: string; endDate: string; players: { name: string; handicapIndex: number }[] }): string {

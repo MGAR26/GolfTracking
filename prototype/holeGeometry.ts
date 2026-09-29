@@ -219,6 +219,58 @@ export function holeConditions(holeNumber: number, par: number): HoleConditions 
   return { bearingDeg, elevationFt, tilt: { u: u / len, v: v / len, pct: Math.round((1 + rnd() * 3) * 10) / 10 } };
 }
 
+/** Height field for the putting surface: the hole's overall tilt plus a couple of gentle rolls. */
+export interface GreenSurface {
+  /** Downhill direction (unit, hole frame) and grade in percent at a point. */
+  slopeAt: (p: Pt) => { du: number; dv: number; pct: number };
+  /** Sample cells across the green: centre, downhill direction, grade. */
+  cells: { c: Pt; half: number; du: number; dv: number; pct: number }[];
+  /** Coarser sample points for downhill arrows. */
+  arrows: { c: Pt; du: number; dv: number; pct: number }[];
+}
+export function greenSurface(holeNumber: number, green: Ellipse, tilt: HoleConditions["tilt"]): GreenSurface {
+  const rnd = seeded(holeNumber * 53 + 11);
+  const bumps = Array.from({ length: 2 }, () => ({
+    c: { u: green.c.u + (rnd() - 0.5) * green.ru * 1.3, v: green.c.v + (rnd() - 0.5) * green.rv * 1.3 },
+    amp: (rnd() < 0.5 ? -1 : 1) * (0.12 + rnd() * 0.16), // yards of height (4–10 in)
+    sigma: (0.35 + rnd() * 0.25) * Math.min(green.ru, green.rv),
+  }));
+  // height falls along the tilt vector at `pct` grade; bumps add local rolls
+  const grad = (p: Pt) => {
+    let gu = -tilt.u * tilt.pct / 100, gv = -tilt.v * tilt.pct / 100;
+    for (const b of bumps) {
+      const dx = p.u - b.c.u, dy = p.v - b.c.v;
+      const e = b.amp * Math.exp(-(dx * dx + dy * dy) / (2 * b.sigma * b.sigma));
+      gu += (-dx / (b.sigma * b.sigma)) * e; gv += (-dy / (b.sigma * b.sigma)) * e;
+    }
+    return { gu, gv };
+  };
+  const slopeAt = (p: Pt) => { const { gu, gv } = grad(p); const m = Math.hypot(gu, gv) || 1e-6; return { du: -gu / m, dv: -gv / m, pct: m * 100 }; };
+  const n = 22, half = Math.max(green.ru, green.rv) / n;
+  const cells: GreenSurface["cells"] = [];
+  for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) {
+    const c = { u: green.c.u + i * half * 2, v: green.c.v + j * half * 2 };
+    if (ellipseRadial(green, c) > 1.08) continue;
+    cells.push({ c, half, ...slopeAt(c) });
+  }
+  // arrows on a coarser grid (about every 3.5 yards) so they stay readable
+  const step = 3.5, arrows: GreenSurface["arrows"] = [];
+  for (let u = green.c.u - green.ru; u <= green.c.u + green.ru; u += step) for (let v = green.c.v - green.rv; v <= green.c.v + green.rv; v += step) {
+    const c = { u, v };
+    if (ellipseRadial(green, c) > 0.92) continue;
+    arrows.push({ c, ...slopeAt(c) });
+  }
+  return { slopeAt, cells, arrows };
+}
+/** Colour for a grade: flat green through amber to red for steep. */
+export function slopeColor(pct: number): string {
+  if (pct < 1) return "#b6dc90";
+  if (pct < 2) return "#cfe08c";
+  if (pct < 3) return "#e9dc84";
+  if (pct < 4) return "#f0c27a";
+  return "#ec9a6c";
+}
+
 export function compassName(deg: number): string {
   const names = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
   return names[Math.round((((deg % 360) + 360) % 360) / 45) % 8];
