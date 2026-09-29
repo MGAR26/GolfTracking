@@ -284,6 +284,18 @@ export function reopenRound(state: State, roundId: string) {
   state.audit.push({ at: now(), actorId: state.actorId, action: "ROUND_REOPEN", detail: round.name });
 }
 
+/** Remove a round. Locked rounds are reopened first so any posted money is reversed on the ledger, never lost. */
+export function deleteRound(state: State, roundId: string) {
+  const round = state.rounds.find((r) => r.id === roundId);
+  if (!round) return;
+  if (tripRole(state, round.tripId, state.actorId) !== "OWNER") throw new Error("Only the trip organizer can delete a round");
+  if (round.status === "LOCKED") reopenRound(state, roundId);
+  state.rounds = state.rounds.filter((r) => r.id !== roundId);
+  delete state.courseGeometry?.[round.courseId];
+  if (state.pendingAims) for (const k of Object.keys(state.pendingAims)) if (k.startsWith(roundId + ":")) delete state.pendingAims[k];
+  state.audit.push({ at: now(), actorId: state.actorId, action: "ROUND_DELETE", detail: round.name });
+}
+
 /* ---------- projections ---------- */
 export interface ProjectedGame { id: string; type: string; name: string; rules: Record<string, unknown>; status: string; teams: GameContext["teams"]; summary: LiveGameSummary; settlements: GameSettlement[]; holesFinalized: number[] }
 export interface ProjectedSideBet extends StoredSideBet { autoResult: "A" | "B" | "TIE" | null }

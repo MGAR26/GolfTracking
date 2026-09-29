@@ -3,7 +3,7 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
@@ -513,6 +513,14 @@ function OverviewTab({ snap }: { snap: Snapshot }) {
         <Card title="Highlights"><ul className="flex flex-wrap gap-2">{highlights.map((h, i) => <li key={i}><Pill tone={h.label === "Birdie" ? "green" : "gold"}>{h.player} · {h.label} on {h.hole}</Pill></li>)}</ul></Card>
       )}
       {live && <Button variant="secondary" onClick={() => nav({ name: "round", roundId, tab: "finish" })}>Finish round</Button>}
+      {me?.tripRole === "OWNER" && (
+        <button type="button" className="text-xs font-semibold text-neg self-center py-2" data-testid="delete-round" onClick={() => {
+          if (!window.confirm(`Delete ${snap.round.name}? Scores, shots and games in it go too.${live ? "" : " Money it posted is reversed on the ledger."}`)) return;
+          const tripId = snap.round.tripId;
+          const err = mutate((s) => deleteRound(s, roundId));
+          if (!err) nav({ name: "trip", tripId });
+        }}>Delete this round</button>
+      )}
     </Page>
   );
 }
