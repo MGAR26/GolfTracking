@@ -3,10 +3,11 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShots, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
-import { buildHole, dist } from "./holeGeometry";
+import { dist } from "./holeGeometry";
+import { fetchRealCourse } from "./osmCourse";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
   SEED_HOLES, liveMoney, setScorecardView, type ScorecardView, type Snapshot,
@@ -495,6 +496,7 @@ function OverviewTab({ snap }: { snap: Snapshot }) {
         {snap.sideBets.length > 0 && <p className="text-xs text-ink-2 mt-2">{snap.sideBets.filter((b) => b.status === "PROPOSED").length} pending · {snap.sideBets.filter((b) => b.status === "ACCEPTED").length} open · {snap.sideBets.filter((b) => b.status === "SETTLED").length} settled side bets</p>}
       </Card>
 
+      <CourseMapCard snap={snap} />
       <Card title="Money position" action={<TextLink className="!text-xs" onClick={() => nav({ name: "money", tripId: snap.round.tripId })}>Trip ledger ›</TextLink>}>
         {roundLedger.length === 0 && <p className="text-sm text-muted">{live ? "Projected from live games; nothing is posted until the round is locked." : "No money posted for this round."}</p>}
         <ul className="grid grid-cols-2 gap-2 text-sm mt-1">
@@ -579,6 +581,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         aimMode={aimMode && tracking && canTrack}
         onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimMode(false); }}
         onAimButton={() => { if (!canTrack) return; if (!tracking) setTracking(true); setAimMode((a) => !a); }}
+        shape={holeShapeFor(state, snap.round.courseId, holeNumber)}
       />
       {me && (
         <div className="card !py-2 flex flex-col gap-1.5">
@@ -607,9 +610,9 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           penalties={findScore(snap.round, me!.playerId, holeNumber).entry.penaltyStrokes}
           putts={findScore(snap.round, me!.playerId, holeNumber).entry.putts}
           gross={findScore(snap.round, me!.playerId, holeNumber).entry.grossScore}
-          remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c)}
-          flag={buildHole(hole.holeNumber, hole.par, hole.yardage).green.c}
-          suggested={clubForRemaining(snap.round, me!.playerId, dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, pendingAim(state, roundId, me!.playerId, holeNumber) ?? buildHole(hole.holeNumber, hole.par, hole.yardage).green.c))}
+          remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, holeShapeFor(state, snap.round.courseId, holeNumber).green.c)}
+          flag={holeShapeFor(state, snap.round.courseId, holeNumber).green.c}
+          suggested={clubForRemaining(snap.round, me!.playerId, dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, pendingAim(state, roundId, me!.playerId, holeNumber) ?? holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
           onMark={(club) => withUndo((s) => { markBall(s, roundId, s.actorId, holeNumber, club); })}
           onPutt={(leaveFt) => withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, leaveFt); })}
           onUpdate={(id, patch) => withUndo((s) => updateShot(s, roundId, id, patch))}
@@ -618,8 +621,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           canUndo={undoStack.length > 0}
           canRedo={redoStack.length > 0}
           onHoleOut={(putts) => { const err = mutate((s) => { const r = holeOut(s, roundId, s.actorId, holeNumber, putts); if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict"); }); if (err) setError(err); }}
-          onAddDistance={(yds) => withUndo((s) => { addShotByDistance(s, roundId, s.actorId, holeNumber, yds, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c); })}
-          onSetDistance={(id, yds) => withUndo((s) => setShotDistance(s, roundId, id, yds, buildHole(hole.holeNumber, hole.par, hole.yardage).green.c))}
+          onAddDistance={(yds) => withUndo((s) => { addShotByDistance(s, roundId, s.actorId, holeNumber, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c); })}
+          onSetDistance={(id, yds) => withUndo((s) => setShotDistance(s, roundId, id, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
           onDelete={(id) => withUndo((s) => deleteShot(s, roundId, id))}
         />
       )}
@@ -977,5 +980,44 @@ function MiniScorecard({ snap, current, view, onView, onHole }: { snap: Snapshot
         </table>
       </div>
     </div>
+  );
+}
+
+
+/** Load the real hole outlines for this course from OpenStreetMap (free, fetched in the browser). */
+function CourseMapCard({ snap }: { snap: Snapshot }) {
+  const { state, mutate } = useApp();
+  const loaded = state.courseGeometry?.[snap.round.courseId] ?? null;
+  const [name, setName] = useState(snap.course.name);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const load = async () => {
+    setBusy(true); setError(null);
+    try {
+      const course = await fetchRealCourse(name);
+      mutate((s) => setCourseGeometry(s, snap.round.courseId, course));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load the course");
+    } finally { setBusy(false); }
+  };
+  const mapped = loaded ? Object.keys(loaded.holes).length : 0;
+  return (
+    <Card title="Course map" action={loaded ? <span className="text-xs text-brass font-semibold">{mapped} of {snap.holes.length} holes from the map</span> : <span className="text-xs text-muted">generated layout</span>}>
+      {loaded ? (
+        <div className="flex items-center justify-between gap-2 text-sm">
+          <p className="text-ink-2">Hole shapes for <b>{loaded.name}</b> come from OpenStreetMap. Holes it hasn&apos;t mapped fall back to the drawn layout.</p>
+          <button type="button" className="btn btn-secondary !min-h-9 text-xs whitespace-nowrap" onClick={() => mutate((s) => setCourseGeometry(s, snap.round.courseId, null))}>Use drawn</button>
+        </div>
+      ) : (
+        <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void load(); }}>
+          <p className="text-sm text-muted">Pull the real tees, fairways, greens, bunkers and water for this course from OpenStreetMap. Free; works for any course mappers have drawn.</p>
+          <div className="flex gap-2">
+            <input className="field !min-h-10 flex-1" value={name} onChange={(e) => setName(e.target.value)} aria-label="Course name on the map" placeholder="Course name as on the map" />
+            <button type="submit" className="btn btn-primary !min-h-10 text-sm whitespace-nowrap" disabled={busy || !name.trim()} data-testid="load-course">{busy ? "Loading…" : "Load real course"}</button>
+          </div>
+          {error && <p className="text-sm text-neg" data-testid="course-error">{error}</p>}
+        </form>
+      )}
+    </Card>
   );
 }

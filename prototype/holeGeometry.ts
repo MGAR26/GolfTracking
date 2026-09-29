@@ -19,6 +19,32 @@ export interface HoleShape {
   bunkers: Ellipse[];
   water: Pt[] | null;
   trees: Pt[];
+  /** Real outlines (OpenStreetMap) when a course is loaded; the ellipses above are then fitted to them. */
+  greenOutline?: Pt[];
+  fairwayOutlines?: Pt[][];
+  bunkerOutlines?: Pt[][];
+  waterOutlines?: Pt[][];
+  real?: boolean;
+}
+/** Outline to draw for the green, and the bunker / water / fairway outlines: real ones when loaded. */
+export const greenOutline = (h: HoleShape) => h.greenOutline ?? ellipsePath(h.green, 36);
+export const bunkerOutlines = (h: HoleShape) => h.bunkerOutlines ?? h.bunkers.map((b) => ellipsePath(b, 36));
+export const waterOutlines = (h: HoleShape) => h.waterOutlines ?? (h.water ? [h.water] : []);
+export const fairwayOutlines = (h: HoleShape) => h.fairwayOutlines ?? (h.fairway.length ? [h.fairway] : []);
+/** Axis-aligned ellipse fitted to a polygon: centroid plus half-extents (good enough for distances and lies). */
+export function fitEllipse(pts: Pt[]): Ellipse {
+  const c = pts.reduce((a, p) => ({ u: a.u + p.u / pts.length, v: a.v + p.v / pts.length }), { u: 0, v: 0 });
+  const ru = Math.max(3, Math.max(...pts.map((p) => Math.abs(p.u - c.u))) * 0.95), rv = Math.max(3, Math.max(...pts.map((p) => Math.abs(p.v - c.v))) * 0.95);
+  return { c, ru, rv, rot: 0 };
+}
+/** A loaded hole (see osmCourse.ts) in the renderer's shape. */
+export function buildRealHole(real: { holeNumber: number; par: number | null; length: number; tee: Pt; line: Pt[]; green: Pt[]; fairways: Pt[][]; bunkers: Pt[][]; water: Pt[][]; trees: Pt[] }, par: number): HoleShape {
+  const green = fitEllipse(real.green);
+  return {
+    holeNumber: real.holeNumber, par: real.par ?? par, length: real.length, tee: real.tee, line: real.line.length >= 2 ? real.line : [real.tee, green.c],
+    fairway: real.fairways[0] ?? [], green, bunkers: real.bunkers.map(fitEllipse), water: real.water[0] ?? null, trees: real.trees,
+    greenOutline: real.green, fairwayOutlines: real.fairways, bunkerOutlines: real.bunkers, waterOutlines: real.water, real: true,
+  };
 }
 
 function seeded(seed: number) {
@@ -61,10 +87,10 @@ function pointInPolygon(pts: Pt[], p: Pt): boolean {
 /** What the ball is sitting in at a point, from the hole's drawn geometry (GPS + course map in the app). */
 export function lieAt(hole: HoleShape, p: Pt): "tee" | "green" | "sand" | "water" | "fairway" | "rough" {
   if (p.u < 6 && Math.abs(p.v) < 8) return "tee";
-  if (ellipseRadial(hole.green, p) <= 1) return "green";
-  if (hole.bunkers.some((b) => ellipseRadial(b, p) <= 1)) return "sand";
-  if (hole.water && pointInPolygon(hole.water, p)) return "water";
-  if (hole.fairway.length && pointInPolygon(hole.fairway, p)) return "fairway";
+  if (pointInPolygon(greenOutline(hole), p)) return "green";
+  if (bunkerOutlines(hole).some((b) => pointInPolygon(b, p))) return "sand";
+  if (waterOutlines(hole).some((w) => pointInPolygon(w, p))) return "water";
+  if (fairwayOutlines(hole).some((f) => pointInPolygon(f, p))) return "fairway";
   return "rough";
 }
 export function ellipsePath(e: Ellipse, steps = 28): Pt[] {
@@ -132,8 +158,8 @@ export function dist(a: Pt, b: Pt): number {
  * center with the green outline. The same function works on any outline polygon, which is
  * what OpenStreetMap greens are.
  */
-export function greenDistances(from: Pt, green: Ellipse): { front: number; middle: number; back: number } {
-  const outline = ellipsePath(green, 72);
+export function greenDistances(from: Pt, green: Ellipse, outlineOverride?: Pt[]): { front: number; middle: number; back: number } {
+  const outline = outlineOverride ?? ellipsePath(green, 72);
   const middle = dist(from, green.c);
   const dir = { u: (green.c.u - from.u) / middle, v: (green.c.v - from.v) / middle };
   let front = Infinity, back = 0;
@@ -192,8 +218,8 @@ export function hazardDistances(from: Pt, flag: Pt, hole: HoleShape, coneDeg = 2
     return { kind, side: sideOf(from, flag, centroid), to, carry, at, farAt };
   };
   const out: HazardDistance[] = [];
-  for (const b of hole.bunkers) { const h = consider("bunker", ellipsePath(b, 20)); if (h) out.push(h); }
-  if (hole.water) { const h = consider("water", hole.water); if (h) out.push(h); }
+  for (const b of bunkerOutlines(hole)) { const h = consider("bunker", b); if (h) out.push(h); }
+  for (const w of waterOutlines(hole)) { const h = consider("water", w); if (h) out.push(h); }
   // Tree clusters: group trees by side and report the nearest edge of the line of trees ahead.
   for (const side of ["L", "R"] as const) {
     const pts = hole.trees.filter((t) => sideOf(from, flag, t) === side && (t.u - from.u) * dir.u + (t.v - from.v) * dir.v > 20);
@@ -245,7 +271,7 @@ export interface GreenSurface {
   /** Coarser sample points for downhill arrows. */
   arrows: { c: Pt; du: number; dv: number; pct: number }[];
 }
-export function greenSurface(holeNumber: number, green: Ellipse, tilt: HoleConditions["tilt"]): GreenSurface {
+export function greenSurface(holeNumber: number, green: Ellipse, tilt: HoleConditions["tilt"], outline?: Pt[]): GreenSurface {
   const rnd = seeded(holeNumber * 53 + 11);
   const bumps = Array.from({ length: 2 }, () => ({
     c: { u: green.c.u + (rnd() - 0.5) * green.ru * 1.3, v: green.c.v + (rnd() - 0.5) * green.rv * 1.3 },
@@ -267,14 +293,14 @@ export function greenSurface(holeNumber: number, green: Ellipse, tilt: HoleCondi
   const cells: GreenSurface["cells"] = [];
   for (let i = -n; i <= n; i++) for (let j = -n; j <= n; j++) {
     const c = { u: green.c.u + i * half * 2, v: green.c.v + j * half * 2 };
-    if (ellipseRadial(green, c) > 1.08) continue;
+    if (outline ? !pointInPolygon(outline, c) && ellipseRadial(green, c) > 1.15 : ellipseRadial(green, c) > 1.08) continue;
     cells.push({ c, half, ...slopeAt(c) });
   }
   // arrows on a coarser grid (about every 3.5 yards) so they stay readable
   const step = 3.5, arrows: GreenSurface["arrows"] = [];
   for (let u = green.c.u - green.ru; u <= green.c.u + green.ru; u += step) for (let v = green.c.v - green.rv; v <= green.c.v + green.rv; v += step) {
     const c = { u, v };
-    if (ellipseRadial(green, c) > 0.92) continue;
+    if (outline ? !pointInPolygon(outline, c) : ellipseRadial(green, c) > 0.92) continue;
     arrows.push({ c, ...slopeAt(c) });
   }
   return { slopeAt, cells, arrows };

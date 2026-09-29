@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildHole, compassName, dist, ellipsePath, greenDistances, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, type Ellipse, type Pt, type Wind } from "./holeGeometry";
+import { buildHole, bunkerOutlines, compassName, dist, ellipsePath, fairwayOutlines, greenDistances, greenOutline, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, waterOutlines, type Ellipse, type HoleShape, type Pt, type Wind } from "./holeGeometry";
 import { missFromAim, type Shot } from "./shots";
 
 /**
@@ -107,14 +107,14 @@ export const TRAIL_COLORS = ["#e4572e", "#3a86ff", "#ffd166", "#c77dff", "#00b4d
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void;
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
   const cond = useMemo(() => holeConditions(holeNumber, par), [holeNumber, par]);
-  const hole = useMemo(() => buildHole(holeNumber, par, yardage), [holeNumber, par, yardage]);
+  const hole = useMemo(() => shape ?? buildHole(holeNumber, par, yardage), [shape, holeNumber, par, yardage]);
   const [tapPos, setTapPos] = useState<Pt>({ u: 0, v: 0 });
   // While tracking, "you" are wherever the last logged shot came to rest.
   const lastRest = shots.length ? shots[shots.length - 1].to : null;
@@ -125,7 +125,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   // Editing an earlier shot? Look at the hole from where that shot started so it is in frame to drag.
   const camPos = frozenPos ?? (focusShot ? focusShot.from : pos);
   const view = useMemo(() => makeView(camPos, flag, hole.green), [camPos, flag, hole.green]);
-  const surface = useMemo(() => greenSurface(holeNumber, hole.green, cond.tilt), [holeNumber, hole.green, cond.tilt]);
+  const surface = useMemo(() => greenSurface(holeNumber, hole.green, cond.tilt, hole.greenOutline), [holeNumber, hole.green, cond.tilt, hole.greenOutline]);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ kind: "aim" | "shot" | "you"; id?: string; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
@@ -137,7 +137,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     el.addEventListener("touchmove", block, { passive: false });
     return () => el.removeEventListener("touchmove", block);
   }, []);
-  const d = greenDistances(pos, hole.green);
+  const d = greenDistances(pos, hole.green, hole.greenOutline);
   const atTee = dist(pos, hole.tee) < 1;
 
   const pointAlong = (uTarget: number): Pt => {
@@ -218,13 +218,13 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             <linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#a3c276" /><stop offset="100%" stopColor="#8fb463" /></linearGradient>
           </defs>
           <rect width={W} height={H} fill="url(#ground)" />
-          {hole.water && <path d={polyPath(view, hole.water)} fill="#6d9fc4" stroke="#4d7fa6" strokeWidth={1} />}
-          {hole.fairway.length > 0 && <path d={polyPath(view, hole.fairway)} fill="url(#fw)" stroke="#86ab5c" strokeWidth={0.8} />}
-          {hole.bunkers.map((b, i) => <path key={i} d={polyPath(view, ellipsePath(b, 36))} fill="#e8dcb0" stroke="#cbbb84" strokeWidth={0.8} />)}
-          <path d={polyPath(view, ellipsePath({ ...hole.green, ru: hole.green.ru + 5, rv: hole.green.rv + 5 }, 36))} fill="#9cc873" opacity={0.7} />
-          <path d={polyPath(view, ellipsePath(hole.green, 36))} fill="#b3dc8c" stroke="#79a95a" strokeWidth={1} />
+          {waterOutlines(hole).map((w, i) => <path key={`w${i}`} d={polyPath(view, w)} fill="#6d9fc4" stroke="#4d7fa6" strokeWidth={1} />)}
+          {fairwayOutlines(hole).map((f, i) => <path key={`f${i}`} d={polyPath(view, f)} fill="url(#fw)" stroke="#86ab5c" strokeWidth={0.8} />)}
+          {bunkerOutlines(hole).map((b, i) => <path key={i} d={polyPath(view, b)} fill="#e8dcb0" stroke="#cbbb84" strokeWidth={0.8} />)}
+          {!hole.real && <path d={polyPath(view, ellipsePath({ ...hole.green, ru: hole.green.ru + 5, rv: hole.green.rv + 5 }, 36))} fill="#9cc873" opacity={0.7} />}
+          <path d={polyPath(view, greenOutline(hole))} fill="#b3dc8c" stroke="#79a95a" strokeWidth={1} />
           {/* putting-surface slopes: colour by grade, arrows point downhill (overhead view) */}
-          <defs><clipPath id={`green-clip-${holeNumber}`}><path d={polyPath(view, ellipsePath(hole.green, 36))} /></clipPath></defs>
+          <defs><clipPath id={`green-clip-${holeNumber}`}><path d={polyPath(view, greenOutline(hole))} /></clipPath></defs>
           <g clipPath={`url(#green-clip-${holeNumber})`} opacity={view.overhead ? 0.95 : 0.8}>
             {surface.cells.map((c, i) => { const h = c.half * 1.04; return <path key={i} d={polyPath(view, [{ u: c.c.u - h, v: c.c.v - h }, { u: c.c.u + h, v: c.c.v - h }, { u: c.c.u + h, v: c.c.v + h }, { u: c.c.u - h, v: c.c.v + h }])} fill={slopeColor(c.pct)} />; })}
           </g>
@@ -239,7 +239,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           })}
           {trees.map((t, i) => { const q = view.project(t); const r = Math.min(26, 4.5 * q.s); return <g key={i}><ellipse cx={q.x + r * 0.3} cy={q.y + r * 0.2} rx={r * 1.1} ry={r * 0.4} fill="rgba(0,0,0,0.18)" /><circle cx={q.x} cy={q.y - r * 0.6} r={r} fill="#3f6a3c" /><circle cx={q.x - r * 0.3} cy={q.y - r * 0.9} r={r * 0.55} fill="#4f7d48" /></g>; })}
           {/* tee box */}
-          <path d={polyPath(view, [{ u: -3, v: -7 }, { u: 5, v: -7 }, { u: 5, v: 7 }, { u: -3, v: 7 }])} fill="#b3dc8c" stroke="#79a95a" strokeWidth={0.8} />
+          {!hole.real && <path d={polyPath(view, [{ u: -3, v: -7 }, { u: 5, v: -7 }, { u: 5, v: 7 }, { u: -3, v: 7 }])} fill="#b3dc8c" stroke="#79a95a" strokeWidth={0.8} />}
           {/* line of play */}
           <path d={linePath(view, pos, flag)} stroke="#f7f3ea" strokeWidth={1.4} strokeDasharray="4 3" fill="none" opacity={0.9} />
           {markers.map(({ m, p }) => { const q = view.project(p); return <g key={m}><circle cx={q.x} cy={q.y} r={2.2} fill="#f7f3ea" /><text x={q.x + 5} y={q.y + 3} {...label}>{m}</text></g>; })}

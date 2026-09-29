@@ -13,7 +13,8 @@ import { computeNetBalances, computePairwiseObligations, type LedgerEntry } from
 import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
-import { buildHole, dist, lieAt, type Pt } from "./holeGeometry";
+import { buildHole, buildRealHole, dist, lieAt, type HoleShape, type Pt } from "./holeGeometry";
+import type { RealCourse } from "./osmCourse";
 import { bagAverages, DEFAULT_CARRY, isPutt, shotFrom, suggestClub, CLUBS, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 
 export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[] }
@@ -30,7 +31,7 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse> }
 export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
@@ -390,8 +391,17 @@ export function logShot(state: State, roundId: string, playerId: string, holeNum
 }
 const aimKey = (roundId: string, playerId: string, holeNumber: number) => `${roundId}:${playerId}:${holeNumber}`;
 function holeShape(state: State, round: Round, holeNumber: number) {
-  const h = state.courses.find((c) => c.id === round.courseId)!.holes.find((x) => x.holeNumber === holeNumber)!;
-  return buildHole(h.holeNumber, h.par, h.yardage);
+  return holeShapeFor(state, round.courseId, holeNumber);
+}
+/** The hole's shape: the real outlines when a course has been loaded, otherwise the generated layout. */
+export function holeShapeFor(state: State, courseId: string, holeNumber: number): HoleShape {
+  const h = state.courses.find((c) => c.id === courseId)!.holes.find((x) => x.holeNumber === holeNumber)!;
+  const real = state.courseGeometry?.[courseId]?.holes[holeNumber];
+  return real ? buildRealHole(real, h.par) : buildHole(h.holeNumber, h.par, h.yardage);
+}
+export function setCourseGeometry(state: State, courseId: string, course: RealCourse | null) {
+  state.courseGeometry ??= {};
+  if (course) state.courseGeometry[courseId] = course; else delete state.courseGeometry[courseId];
 }
 /** Lie read off the hole geometry; water counts as a rough lie plus the penalty the player adds. */
 function autoLie(state: State, round: Round, holeNumber: number, p: Pt): Lie {
