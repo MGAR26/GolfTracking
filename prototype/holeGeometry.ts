@@ -25,6 +25,8 @@ export interface HoleShape {
   bunkerOutlines?: Pt[][];
   waterOutlines?: Pt[][];
   real?: boolean;
+  /** Compass bearing tee → green when known from the map. */
+  bearingDeg?: number;
 }
 /** Outline to draw for the green, and the bunker / water / fairway outlines: real ones when loaded. */
 export const greenOutline = (h: HoleShape) => h.greenOutline ?? ellipsePath(h.green, 36);
@@ -38,12 +40,12 @@ export function fitEllipse(pts: Pt[]): Ellipse {
   return { c, ru, rv, rot: 0 };
 }
 /** A loaded hole (see osmCourse.ts) in the renderer's shape. */
-export function buildRealHole(real: { holeNumber: number; par: number | null; length: number; tee: Pt; line: Pt[]; green: Pt[]; fairways: Pt[][]; bunkers: Pt[][]; water: Pt[][]; trees: Pt[] }, par: number): HoleShape {
+export function buildRealHole(real: { holeNumber: number; par: number | null; length: number; tee: Pt; line: Pt[]; green: Pt[]; fairways: Pt[][]; bunkers: Pt[][]; water: Pt[][]; trees: Pt[]; bearingDeg?: number }, par: number): HoleShape {
   const green = fitEllipse(real.green);
   return {
     holeNumber: real.holeNumber, par: real.par ?? par, length: real.length, tee: real.tee, line: real.line.length >= 2 ? real.line : [real.tee, green.c],
     fairway: real.fairways[0] ?? [], green, bunkers: real.bunkers.map(fitEllipse), water: real.water[0] ?? null, trees: real.trees,
-    greenOutline: real.green, fairwayOutlines: real.fairways, bunkerOutlines: real.bunkers, waterOutlines: real.water, real: true,
+    greenOutline: real.green, fairwayOutlines: real.fairways, bunkerOutlines: real.bunkers, waterOutlines: real.water, real: true, bearingDeg: real.bearingDeg,
   };
 }
 

@@ -113,8 +113,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
-  const cond = useMemo(() => holeConditions(holeNumber, par), [holeNumber, par]);
   const hole = useMemo(() => shape ?? buildHole(holeNumber, par, yardage), [shape, holeNumber, par, yardage]);
+  const cond = useMemo(() => { const c = holeConditions(holeNumber, par); return hole.bearingDeg !== undefined ? { ...c, bearingDeg: hole.bearingDeg } : c; }, [holeNumber, par, hole.bearingDeg]);
   const [tapPos, setTapPos] = useState<Pt>({ u: 0, v: 0 });
   // While tracking, "you" are wherever the last logged shot came to rest.
   const lastRest = shots.length ? shots[shots.length - 1].to : null;
@@ -199,7 +199,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
 
   const you = view.project(pos);
   const fl = view.project(flag);
-  const hazards = hazardDistances(pos, flag, hole).slice(0, 4);
+  const hazards = hazardDistances(pos, flag, hole).slice(0, 3);
   const fallScreen = (() => { const a = view.project(flag), b = view.project({ u: flag.u + cond.tilt.u * 5, v: flag.v + cond.tilt.v * 5 }); return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90; })();
   const pl = playsLike(pos, flag, hole.length, cond, wind);
   // Wind arrow relative to the view: 0° = up the screen (the direction you're facing).
@@ -262,7 +262,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {hazards.flatMap((h) => {
             const color = h.kind === "water" ? "#9fd0f0" : h.kind === "bunker" ? "#f1e2a6" : "#b7e29a";
             const out = h.side === "L" ? -1 : 1; // push labels away from the line of play
-            const pts = h.kind === "trees" ? [{ p: h.at, n: h.to, dy: 0 }] : [{ p: h.at, n: h.to, dy: 9 }, { p: h.farAt, n: h.carry, dy: -9 }];
+            // one number for trees, thin hazards, or anything past a full shot; front and carry when depth matters
+            const twoNumbers = h.kind !== "trees" && h.carry - h.to >= 12 && h.to <= 260;
+            const pts = twoNumbers ? [{ p: h.at, n: h.to, dy: 9 }, { p: h.farAt, n: h.carry, dy: -9 }] : [{ p: h.at, n: h.to, dy: 0 }];
             return pts.filter(({ p }) => ahead(p)).map(({ p, n, dy }, k) => {
               const q = view.project(p);
               let lx = q.x + out * 30, ly = q.y + dy;

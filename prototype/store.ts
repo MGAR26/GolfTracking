@@ -15,6 +15,8 @@ import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlem
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
 import { buildHole, buildRealHole, dist, lieAt, type HoleShape, type Pt } from "./holeGeometry";
 import type { RealCourse } from "./osmCourse";
+import pinehurst4Json from "./courses/pinehurst-4.json";
+const PINEHURST_4 = pinehurst4Json as unknown as RealCourse;
 import { bagAverages, DEFAULT_CARRY, isPutt, shotFrom, suggestClub, CLUBS, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 
 export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[] }
@@ -39,10 +41,14 @@ export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 const now = () => new Date().toISOString();
 
-export const SEED_HOLES: HoleInfo[] = [
-  [1, 4, 401, 7], [2, 5, 532, 3], [3, 3, 178, 15], [4, 4, 438, 1], [5, 4, 392, 11], [6, 3, 165, 17], [7, 4, 412, 5], [8, 5, 548, 9], [9, 4, 385, 13],
-  [10, 4, 421, 4], [11, 3, 190, 16], [12, 5, 560, 2], [13, 4, 377, 12], [14, 4, 445, 6], [15, 5, 515, 10], [16, 3, 152, 18], [17, 4, 408, 8], [18, 4, 430, 14],
-].map(([holeNumber, par, yardage, strokeIndex]) => ({ holeNumber, par, yardage, strokeIndex }));
+/** Hole card for the demo course: par and yardage come from the mapped holes (straight-line tee to green), stroke index is ours. */
+const STROKE_INDEX = [7, 3, 15, 1, 11, 17, 5, 9, 13, 4, 16, 2, 12, 6, 10, 18, 8, 14];
+export const SEED_HOLES: HoleInfo[] = STROKE_INDEX.map((strokeIndex, i) => {
+  const real = PINEHURST_4.holes[i + 1];
+  const yardage = real ? Math.round(real.length) : 400;
+  const par = real?.par ?? 4;
+  return { holeNumber: i + 1, par, yardage, strokeIndex };
+});
 
 export function seedState(): State {
   const players: Player[] = [
@@ -51,9 +57,9 @@ export function seedState(): State {
     { id: "p_ryan", name: "Ryan", handicapIndex: 8.7 },
     { id: "p_john", name: "John", handicapIndex: 14.1 },
   ];
-  const course: Course = { id: "c_pinehurst4", name: "Pinehurst No. 4", teeName: "Blue", par: 72, courseRating: 72.4, slopeRating: 135, holes: SEED_HOLES };
+  const course: Course = { id: "c_pinehurst4", name: "Pinehurst No. 4", teeName: "Blue", par: SEED_HOLES.reduce((a, h) => a + h.par, 0), courseRating: 72.4, slopeRating: 135, holes: SEED_HOLES };
   const trip: Trip = { id: "t_pinehurst", name: "Pinehurst Trip 2026", destination: "Pinehurst, NC", startDate: "2026-10-09", endDate: "2026-10-11", ownerId: "p_matt", playerIds: players.map((p) => p.id) };
-  const state: State = { players, trips: [trip], courses: [course], rounds: [], ledger: [], actorId: "p_matt", audit: [] };
+  const state: State = { players, trips: [trip], courses: [course], rounds: [], ledger: [], actorId: "p_matt", audit: [], courseGeometry: { [course.id]: PINEHURST_4 } };
   createRound(state, {
     tripId: trip.id, courseId: course.id, name: "Round 1", startsAt: "2026-10-09T09:20", countsTowardTrip: true, scoringMode: "HYBRID", scorerPlayerId: "p_matt",
     playerIds: players.map((p) => p.id),
@@ -64,11 +70,12 @@ export function seedState(): State {
     ],
   });
   const round = state.rounds[0];
+  // Holes 1–3 at Pinehurst No. 4 are all par 4s.
   const seedScores: Record<string, [number, number | null, boolean | null, HoleEntry["fairwayResult"]][]> = {
-    p_matt: [[4, 2, true, "HIT"], [5, 2, true, "HIT"], [3, 1, true, null]],
-    p_marcus: [[5, 2, false, "LEFT"], [6, 3, false, "HIT"], [4, 2, false, null]],
-    p_ryan: [[4, 1, false, "RIGHT"], [5, 2, true, "HIT"], [3, 2, true, null]],
-    p_john: [[6, 2, false, "LEFT"], [7, 3, false, "RIGHT"], [4, 2, false, null]],
+    p_matt: [[4, 2, true, "HIT"], [4, 2, true, "HIT"], [4, 2, true, "LEFT"]],
+    p_marcus: [[5, 2, false, "LEFT"], [5, 2, false, "HIT"], [4, 2, true, "HIT"]],
+    p_ryan: [[4, 1, false, "RIGHT"], [5, 2, true, "HIT"], [3, 1, true, "HIT"]],
+    p_john: [[6, 2, false, "LEFT"], [5, 3, false, "RIGHT"], [5, 2, false, "LEFT"]],
   };
   for (const [pid, arr] of Object.entries(seedScores)) {
     arr.forEach(([grossScore, putts, gir, fairwayResult], i) => {
@@ -78,14 +85,14 @@ export function seedState(): State {
   createSideBet(state, { roundId: round.id, type: "LONGEST_DRIVE_IN_FAIRWAY", description: "Longest Drive in Fairway - Hole 8", amountCents: 2000, basis: "GROSS", holeNumbers: [8], opponentIds: ["p_marcus"] }, "p_matt");
   round.groups = [{ name: "Group A", playerIds: ["p_matt", "p_ryan"] }, { name: "Group B", playerIds: ["p_marcus", "p_john"] }];
   // Everyone tracked shots on the holes already played (shots = gross − putts), plus the group ahead on hole 4.
-  const tracked: Record<string, number[]> = { p_matt: [2, 3, 2], p_marcus: [3, 3, 2, 3], p_ryan: [3, 3, 1], p_john: [4, 4, 2, 3] };
-  Object.entries(tracked).forEach(([pid, counts], pi) => counts.forEach((n, hi) => seedHoleShots(round, pid, hi + 1, n, pi * 7 + hi)));
+  const tracked: Record<string, number[]> = { p_matt: [2, 2, 2], p_marcus: [3, 3, 2, 2], p_ryan: [3, 3, 2], p_john: [4, 2, 3, 2] };
+  Object.entries(tracked).forEach(([pid, counts], pi) => counts.forEach((n, hi) => seedHoleShots(state, round, pid, hi + 1, n, pi * 7 + hi)));
   return state;
 }
 /** Deterministic, plausible rest points for a seeded hole: long shots first, last one on or beside the green. */
-function seedHoleShots(round: Round, playerId: string, holeNumber: number, n: number, salt: number) {
-  const h = SEED_HOLES[holeNumber - 1];
-  const green = buildHole(h.holeNumber, h.par, h.yardage).green.c;
+function seedHoleShots(state: State, round: Round, playerId: string, holeNumber: number, n: number, salt: number) {
+  const shape = holeShapeFor(state, round.courseId, holeNumber);
+  const green = shape.green.c;
   const rnd = (i: number) => { const x = Math.sin(salt * 97.3 + i * 13.7 + holeNumber * 3.1) * 10000; return x - Math.floor(x); };
   let from: Pt = { u: 0, v: 0 };
   round.shots ??= [];
@@ -95,7 +102,8 @@ function seedHoleShots(round: Round, playerId: string, holeNumber: number, n: nu
     const to: Pt = last
       ? { u: green.u + (rnd(i) - 0.5) * 22, v: green.v + (rnd(i + 50) - 0.5) * 26 }
       : { u: from.u + Math.min(remaining - 40, 150 + rnd(i) * 130), v: from.v + (rnd(i + 50) - 0.5) * 60 };
-    round.shots.push({ id: `seed_${playerId}_${holeNumber}_${i}`, ...shotFrom(from, to, playerId, holeNumber, i, round.shots) });
+    const l = lieAt(shape, to);
+    round.shots.push({ id: `seed_${playerId}_${holeNumber}_${i}`, ...shotFrom(from, to, playerId, holeNumber, i, round.shots), lie: last ? "green" : l === "water" ? "rough" : l });
     from = to;
   }
 }
