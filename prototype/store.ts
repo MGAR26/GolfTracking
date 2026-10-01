@@ -33,7 +33,7 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse> }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[] }
 export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
@@ -82,7 +82,10 @@ export function seedState(): State {
       round.scores.push({ entry: { ...emptyHoleEntry(pid, i + 1), grossScore, putts, gir, fairwayResult }, version: 1, updatedBy: "p_matt" });
     });
   }
-  createSideBet(state, { roundId: round.id, type: "LONGEST_DRIVE_IN_FAIRWAY", description: "Longest Drive in Fairway - Hole 8", amountCents: 2000, basis: "GROSS", holeNumbers: [8], opponentIds: ["p_marcus"] }, "p_matt");
+  // Side bets: a long-drive contest on 5 (accepted) and a closest-to-pin on the par-3 4th (still waiting on John).
+  const ld = createSideBet(state, { roundId: round.id, type: "LONGEST_DRIVE_IN_FAIRWAY", description: "Longest drive in the fairway", amountCents: 2000, basis: "GROSS", holeNumbers: [5], opponentIds: ["p_marcus"] }, "p_matt");
+  acceptSideBet(state, round.id, ld, "p_marcus");
+  createSideBet(state, { roundId: round.id, type: "CLOSEST_TO_PIN", description: "Closest to the pin", amountCents: 1000, basis: "GROSS", holeNumbers: [4], opponentIds: ["p_john"] }, "p_ryan");
   round.groups = [{ name: "Group A", playerIds: ["p_matt", "p_ryan"] }, { name: "Group B", playerIds: ["p_marcus", "p_john"] }];
   // Everyone tracked shots on the holes already played (shots = gross − putts), plus the group ahead on hole 4.
   const tracked: Record<string, number[]> = { p_matt: [2, 2, 2], p_marcus: [3, 3, 2, 2], p_ryan: [3, 3, 2], p_john: [4, 2, 3, 2] };
@@ -114,6 +117,10 @@ export function groupMates(round: Round, playerId: string): string[] {
 }
 export function setShotFilter(state: State, filter: ShotFilter) { state.shotFilter = filter; }
 export function setScorecardView(state: State, view: ScorecardView) { state.scorecardView = view; }
+export function dismissBetNote(state: State, roundId: string, holeNumber: number, betId: string) {
+  state.dismissedBetNotes ??= [];
+  state.dismissedBetNotes.push(`${roundId}:${holeNumber}:${betId}`);
+}
 /** Money up or down so far this round: projected game settlements as if it ended now. */
 export function liveMoney(snap: Snapshot, playerId: string): number {
   return snap.games.flatMap((g) => g.settlements).reduce((a, st) => a + (st.toPlayerId === playerId ? st.amountCents : 0) - (st.fromPlayerId === playerId ? st.amountCents : 0), 0);

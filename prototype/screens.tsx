@@ -3,7 +3,7 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
@@ -541,6 +541,18 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const [tracking, setTracking] = useState(false);
   const [aimMode, setAimMode] = useState(false);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  // Side bets riding on this hole, as notices on the picture; closing one hides it on this hole for this player.
+  const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
+  const betTitle = (t: string) => (t === "LONGEST_DRIVE_IN_FAIRWAY" ? "Long drive" : t === "CLOSEST_TO_PIN" ? "Closest to pin" : t === "HOLE_WINNER" ? "Hole winner" : t.toLowerCase().replace(/_/g, " "));
+  const holeNotes = snap.sideBets
+    .filter((b) => b.terms.holeNumbers.includes(holeNumber) && (b.status === "ACCEPTED" || b.status === "PROPOSED") && !(state.dismissedBetNotes ?? []).includes(`${roundId}:${holeNumber}:${b.id}`))
+    .map((b) => ({
+      id: b.id,
+      title: `${betTitle(b.terms.type)} · ${money(b.terms.amountCents)}`,
+      detail: `${b.participants.filter((p) => p.side === "A").map((p) => nameOfId(p.playerId)).join(" & ")} vs ${b.participants.filter((p) => p.side === "B").map((p) => nameOfId(p.playerId)).join(" & ")}${b.status === "PROPOSED" ? " · not accepted yet" : ""}`,
+      tone: b.status === "ACCEPTED" ? ("brass" as const) : ("muted" as const),
+      onDismiss: () => mutate((s) => dismissBetNote(s, roundId, holeNumber, b.id)),
+    }));
   const me = snap.players.find((p) => p.playerId === state.actorId);
   const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
   const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
@@ -590,6 +602,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimMode(false); }}
         onAimButton={() => { if (!canTrack) return; if (!tracking) setTracking(true); setAimMode((a) => !a); }}
         shape={holeShapeFor(state, snap.round.courseId, holeNumber)}
+        notes={holeNotes}
       />
       {me && (
         <div className="card !py-2 flex flex-col gap-1.5">
