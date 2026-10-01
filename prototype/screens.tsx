@@ -551,8 +551,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
       const won = b.status === "SETTLED" && b.resolution?.winnerPlayerId ? `${nameOfId(b.resolution.winnerPlayerId)} won ${money(b.terms.amountCents)}` : b.status === "VOID" ? "tied · no money" : null;
       return {
         id: b.id,
-        title: won ? `${betTitle(b.terms.type)} · ${won}` : `${betTitle(b.terms.type)} · ${money(b.terms.amountCents)}`,
-        detail: `${sides}${b.status === "PROPOSED" ? " · not accepted yet" : ""}`,
+        title: won ?? `${betTitle(b.terms.type)} · ${money(b.terms.amountCents)}`,
+        detail: won ? `${betTitle(b.terms.type)} · ${sides}` : `${sides}${b.status === "PROPOSED" ? " · not accepted yet" : ""}`,
         tone: b.status === "ACCEPTED" ? ("brass" as const) : won ? ("won" as const) : ("muted" as const),
         onDismiss: () => mutate((s) => dismissBetNote(s, roundId, holeNumber, b.id)),
       };
