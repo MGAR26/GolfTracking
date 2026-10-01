@@ -120,6 +120,9 @@ export function groupMates(round: Round, playerId: string): string[] {
 }
 export function setShotFilter(state: State, filter: ShotFilter) { state.shotFilter = filter; }
 export function setScorecardView(state: State, view: ScorecardView) { state.scorecardView = view; }
+export function restoreBetNote(state: State, roundId: string, holeNumber: number, betId: string) {
+  state.dismissedBetNotes = (state.dismissedBetNotes ?? []).filter((k) => k !== `${roundId}:${holeNumber}:${betId}`);
+}
 export function dismissBetNote(state: State, roundId: string, holeNumber: number, betId: string) {
   state.dismissedBetNotes ??= [];
   state.dismissedBetNotes.push(`${roundId}:${holeNumber}:${betId}`);

@@ -3,7 +3,7 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
@@ -580,7 +580,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
 
   return (
     <Page className="!pt-3">
-      <MiniScorecard snap={snap} current={holeNumber} view={state.scorecardView ?? "gross"} onView={(v) => mutate((s) => setScorecardView(s, v))} onHole={go} />
+      <MiniScorecard snap={snap} current={holeNumber} view={state.scorecardView ?? "gross"} onView={(v) => mutate((s) => setScorecardView(s, v))} onHole={go} dismissed={state.dismissedBetNotes ?? []} onRestore={(hole, betId) => mutate((s) => restoreBetNote(s, roundId, hole, betId))} />
       <header className="flex items-center justify-between -mb-1">
         <NavBtn onClick={prev !== null ? () => go(prev) : null} label="Previous hole">‹</NavBtn>
         <p className="text-xs text-ink-2">Hole {hole.holeNumber} of {snap.holes.length}</p>
@@ -936,13 +936,18 @@ function FinishTab({ snap }: { snap: Snapshot }) {
 
 
 /** Scorecard strip: every hole across, a row per player, gross / net / both, putts in the corner, money so far. */
-function MiniScorecard({ snap, current, view, onView, onHole }: { snap: Snapshot; current: number; view: ScorecardView; onView: (v: ScorecardView) => void; onHole: (hole: number) => void }) {
+function MiniScorecard({ snap, current, view, onView, onHole, dismissed, onRestore }: { snap: Snapshot; current: number; view: ScorecardView; onView: (v: ScorecardView) => void; onHole: (hole: number) => void; dismissed: string[]; onRestore: (hole: number, betId: string) => void }) {
+  // Side bets as a row you can open under the card: every bet on the nine, who, stake, state; restore a hidden notice.
+  const [betsOpen, setBetsOpen] = useState(false);
+  const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
+  const betTitle = (t: string) => (t === "LONGEST_DRIVE_IN_FAIRWAY" ? "Long drive" : t === "CLOSEST_TO_PIN" ? "Closest to pin" : t === "HOLE_WINNER" ? "Hole winner" : t.toLowerCase().replace(/_/g, " "));
+  const liveBets = snap.sideBets.filter((b) => ["ACCEPTED", "PROPOSED", "SETTLED", "VOID"].includes(b.status));
   // Holes with a side bet riding on them: gold while open, grey once settled.
   const betMark = (hole: number) => {
     const bets = snap.sideBets.filter((b) => b.terms.holeNumbers.includes(hole) && ["ACCEPTED", "PROPOSED", "SETTLED", "VOID"].includes(b.status));
     if (!bets.length) return null;
     const open = bets.some((b) => b.status === "ACCEPTED" || b.status === "PROPOSED");
-    return <span className={`absolute top-0.5 right-0.5 text-[7px] leading-none ${open ? "text-brass" : "text-muted"}`} aria-label={open ? "side bet on this hole" : "side bet settled"}>★</span>;
+    return <button type="button" onClick={() => setBetsOpen((o) => !o)} className={`absolute top-0 right-0 px-0.5 text-[7px] leading-none ${open ? "text-brass" : "text-muted"}`} aria-label={open ? "side bet on this hole" : "side bet settled"}>★</button>;
   };
   // Nine at a time so nothing is crammed or hidden; follows the hole you're on.
   const [pick, setPick] = useState<{ forHole: number; nine: "front" | "back" } | null>(null);
@@ -959,6 +964,7 @@ function MiniScorecard({ snap, current, view, onView, onHole }: { snap: Snapshot
     <div className="card !p-0 overflow-hidden" data-testid="mini-scorecard">
       <div className="flex items-center justify-between px-2 pt-1.5">
         <div className="seg !gap-0.5 w-28" aria-label="Which nine">{(["front", "back"] as const).map((n) => <button key={n} type="button" aria-pressed={nine === n} onClick={() => setNine(n)} className="!min-h-7 !text-[11px]">{n === "front" ? "1–9" : "10–18"}</button>)}</div>
+        {liveBets.length > 0 && <button type="button" onClick={() => setBetsOpen((o) => !o)} aria-expanded={betsOpen} className={`text-[11px] font-semibold px-2 py-1 rounded-md ${betsOpen ? "bg-brass-soft text-ink" : "text-brass"}`} data-testid="bets-toggle">★ Bets {betsOpen ? "▴" : "▾"}</button>}
         <div className="seg !gap-0.5 w-36" aria-label="Scorecard view">{(["gross", "net", "both"] as ScorecardView[]).map((v) => <button key={v} type="button" aria-pressed={view === v} onClick={() => onView(v)} className="!min-h-7 !text-[11px] capitalize">{v}</button>)}</div>
       </div>
       <div className="overflow-hidden">
@@ -1012,6 +1018,24 @@ function MiniScorecard({ snap, current, view, onView, onHole }: { snap: Snapshot
           </tbody>
         </table>
       </div>
+      {betsOpen && (
+        <ul className="border-t border-line divide-y divide-line text-[11px]" data-testid="bets-row">
+          {liveBets.sort((a, b) => Math.min(...a.terms.holeNumbers) - Math.min(...b.terms.holeNumbers)).map((b) => {
+            const holeOf = b.terms.holeNumbers[0];
+            const sides = `${b.participants.filter((p) => p.side === "A").map((p) => nameOfId(p.playerId)).join(" & ")} vs ${b.participants.filter((p) => p.side === "B").map((p) => nameOfId(p.playerId)).join(" & ")}`;
+            const state = b.status === "SETTLED" && b.resolution?.winnerPlayerId ? `${nameOfId(b.resolution.winnerPlayerId)} won` : b.status === "VOID" ? "tied" : b.status === "PROPOSED" ? "waiting to accept" : "open";
+            const hidden = dismissed.includes(`${snap.round.id}:${holeOf}:${b.id}`);
+            return (
+              <li key={b.id} className="flex items-center gap-2 px-2 py-1.5">
+                <button type="button" onClick={() => onHole(holeOf)} className={`font-display text-sm w-6 text-center rounded ${holeOf === current ? "bg-brass-soft" : ""}`} aria-label={`Go to hole ${holeOf}`}>{holeOf}</button>
+                <span className="flex-1 min-w-0 truncate"><b>{betTitle(b.terms.type)}</b> · {money(b.terms.amountCents)} · {sides}</span>
+                <span className={`whitespace-nowrap font-semibold ${b.status === "ACCEPTED" ? "text-brass" : b.status === "SETTLED" ? "text-ink" : "text-muted"}`}>{state}</span>
+                {hidden && <button type="button" className="text-accent font-semibold whitespace-nowrap" onClick={() => onRestore(holeOf, b.id)}>show on hole</button>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }
