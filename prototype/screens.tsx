@@ -1004,6 +1004,12 @@ function MiniScorecard({ snap, current, view, onView, onHole, dismissed, onResto
                     return (
                       <td key={h.holeNumber} className={`relative py-1 text-center border-t border-line align-middle ${h.holeNumber === current ? "bg-brass-soft" : ""}`} onClick={() => onHole(h.holeNumber)}>
                         {putts !== null && line?.gross !== null && <span className="absolute top-0.5 right-0.5 text-[7px] leading-none text-muted" aria-label={`${putts} putts`}>{putts}</span>}
+                        {/* handicap strokes the classic way: one dot per stroke received, in the corner of the cell */}
+                        {(line?.strokesReceived ?? 0) !== 0 && (
+                          <span className="absolute bottom-0.5 left-0.5 inline-flex gap-px" aria-label={`${Math.abs(line!.strokesReceived)} stroke${Math.abs(line!.strokesReceived) === 1 ? "" : "s"} ${line!.strokesReceived > 0 ? "received" : "given"}`}>
+                            {Array.from({ length: Math.min(3, Math.abs(line!.strokesReceived)) }).map((_, i) => <span key={i} className={`inline-block h-[3px] w-[3px] rounded-full ${line!.strokesReceived > 0 ? "bg-accent" : "bg-neg"}`} />)}
+                          </span>
+                        )}
                         {view === "gross" && num(line?.gross ?? null, line?.grossToPar ?? null)}
                         {view === "net" && num(line?.net ?? null, line?.netToPar ?? null)}
                         {view === "both" && <div className="flex flex-col items-center gap-0.5">{num(line?.gross ?? null, line?.grossToPar ?? null)}{num(line?.net ?? null, line?.netToPar ?? null, true)}</div>}
