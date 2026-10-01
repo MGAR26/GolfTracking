@@ -135,7 +135,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     // React registers touch listeners as passive; block page scroll ourselves while a drag is live.
     const el = svgRef.current;
     if (!el) return;
-    const block = (e: TouchEvent) => { if (dragRef.current) e.preventDefault(); };
+    const block = (e: TouchEvent) => { if (dragRef.current || e.touches.length > 1) e.preventDefault(); };
     el.addEventListener("touchmove", block, { passive: false });
     return () => el.removeEventListener("touchmove", block);
   }, []);
@@ -154,12 +154,42 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const trees = hole.trees.filter(ahead).sort((a, b) => view.toView(b).u - view.toView(a).u);
 
   /** Screen point → world point on the ground, clamped to the hole corridor; null above the horizon. */
+  // Pinch zoom: a scale + offset applied to the whole drawing (two fingers to zoom and pan, button to reset).
+  const [zoom, setZoom] = useState({ k: 1, tx: 0, ty: 0 });
+  const pinchRef = useRef<{ pts: Map<number, { x: number; y: number }>; start?: { d: number; mid: { x: number; y: number }; zoom: { k: number; tx: number; ty: number } } }>({ pts: new Map() });
+  const svgXY = (clientX: number, clientY: number) => { const rect = svgRef.current!.getBoundingClientRect(); return { x: ((clientX - rect.left) / rect.width) * W, y: ((clientY - rect.top) / rect.height) * H }; };
+  const clampZoom = (z: { k: number; tx: number; ty: number }) => { const k = Math.min(2.5, Math.max(1, z.k)); return { k, tx: Math.min(0, Math.max(W - W * k, z.tx)), ty: Math.min(0, Math.max(H - H * k, z.ty)) }; };
+  const onPinchDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    const pr = pinchRef.current;
+    pr.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pr.pts.size === 2) {
+      const [a, b] = [...pr.pts.values()].map((p) => svgXY(p.x, p.y));
+      pr.start = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, zoom };
+      dragRef.current = null; setFrozenPos(null); // a second finger cancels any marker drag
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+  };
+  const onPinchMove = (e: React.PointerEvent<SVGSVGElement>): boolean => {
+    const pr = pinchRef.current;
+    if (!pr.pts.has(e.pointerId)) return false;
+    pr.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pr.pts.size < 2 || !pr.start) return false;
+    const [a, b] = [...pr.pts.values()].map((p) => svgXY(p.x, p.y));
+    const d = Math.hypot(a.x - b.x, a.y - b.y) || 1, mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    const k = pr.start.zoom.k * (d / pr.start.d);
+    // keep the drawing point that was under the first midpoint under the current midpoint
+    const px = (pr.start.mid.x - pr.start.zoom.tx) / pr.start.zoom.k, py = (pr.start.mid.y - pr.start.zoom.ty) / pr.start.zoom.k;
+    setZoom(clampZoom({ k, tx: mid.x - px * k, ty: mid.y - py * k }));
+    suppressClick.current = true;
+    return true;
+  };
+  const onPinchUp = (e: React.PointerEvent<SVGSVGElement>) => { const pr = pinchRef.current; pr.pts.delete(e.pointerId); if (pr.pts.size < 2) pr.start = undefined; };
   const worldAt = (clientX: number, clientY: number): Pt | null => {
     const el = svgRef.current;
     if (!el) return null;
-    const rect = el.getBoundingClientRect();
-    const x = ((clientX - rect.left) / rect.width) * W;
-    const y = ((clientY - rect.top) / rect.height) * H;
+    const s0 = svgXY(clientX, clientY);
+    const x = (s0.x - zoom.tx) / zoom.k;
+    const y = (s0.y - zoom.ty) / zoom.k;
     if (y < view.horizon + 6) return null;
     const p = view.unproject(x, y);
     return { u: Math.max(-10, Math.min(hole.length + 25, p.u)), v: Math.max(-140, Math.min(140, p.v)) };
@@ -179,6 +209,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     svgRef.current?.setPointerCapture(e.pointerId);
   };
   const onDragMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (onPinchMove(e)) return;
     const d = dragRef.current;
     if (!d) return;
     const p = worldAt(e.clientX, e.clientY);
@@ -190,6 +221,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     else if (d.kind === "you") setTapPos(p);
   };
   const endDrag = (e: React.PointerEvent<SVGSVGElement>) => {
+    onPinchUp(e);
     const d = dragRef.current;
     if (!d) return;
     dragRef.current = null;
@@ -207,18 +239,23 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   // Wind arrow relative to the view: 0° = up the screen (the direction you're facing).
   const shotBearing = pl.shotBearingDeg;
   const windRel = ((wind.fromDeg + 180 - shotBearing) % 360 + 360) % 360;
-  const layups = numbers.map((n) => ({ n, ...layupPoint(pos, flag, n) })).filter((l) => l.point) as { n: number; point: Pt; distance: number }[];
+  const layups = numbers.map((n) => ({ n, ...layupPoint(pos, flag, n) })).filter((l) => l.point).map((l) => {
+    const lp = l as { n: number; point: Pt; distance: number };
+    // what the lay-up itself plays like (wind + slope along that line), and what the leave plays like from there
+    return { ...lp, plays: Math.round(playsLike(pos, lp.point, hole.length, cond, wind).playsLike), leavePlays: Math.round(playsLike(lp.point, flag, hole.length, cond, wind).playsLike) };
+  });
   const aimPt = aim ? view.project(aim) : null;
   const aimDist = aim ? dist(pos, aim) : null;
 
   return (
     <div className="card overflow-hidden !p-0" data-testid="hole-view">
       <div className="relative">
-        <svg viewBox={`0 0 ${W} ${H}`} className={`block w-full h-auto select-none ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} ref={svgRef} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
+        <svg viewBox={`0 0 ${W} ${H}`} className={`block w-full h-auto select-none ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} onPointerDown={onPinchDown} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} ref={svgRef} style={{ touchAction: "pan-y" }} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
           <defs>
             <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8aa66a" /><stop offset="100%" stopColor="#5f7f48" /></linearGradient>
             <linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#a3c276" /><stop offset="100%" stopColor="#8fb463" /></linearGradient>
           </defs>
+          <g transform={`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.k})`} data-testid="zoom-layer">
           <rect width={W} height={H} fill="url(#ground)" />
           {waterOutlines(hole).map((w, i) => <path key={`w${i}`} d={polyPath(view, w)} fill="#6d9fc4" stroke="#4d7fa6" strokeWidth={1} />)}
           {fairwayOutlines(hole).map((f, i) => <path key={`f${i}`} d={polyPath(view, f)} fill="url(#fw)" stroke="#86ab5c" strokeWidth={0.8} />)}
@@ -316,7 +353,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             <circle cx={you.x} cy={you.y} r={5.5} fill="#1b2a41" stroke="#f7f3ea" strokeWidth={1.8} />
             {!tracking && <circle cx={you.x} cy={you.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("you")} aria-label="Drag your position" />}
           </>}
+          </g>
         </svg>
+        {zoom.k > 1.02 && <button type="button" onClick={() => setZoom({ k: 1, tx: 0, ty: 0 })} className="absolute left-2 top-[110px] rounded-full bg-ink/85 text-[var(--bg)] px-2.5 py-1 text-[11px] font-semibold" data-testid="zoom-reset">{zoom.k.toFixed(1)}× · reset</button>}
         <div className="absolute top-2 left-2 rounded-lg bg-ink/85 text-[var(--bg)] px-2.5 py-1.5 leading-tight">
           <div className="font-display text-xl">Hole {holeNumber}</div>
           <div className="text-[10px] uppercase tracking-wide opacity-85">Par {par}{yardage ? ` · ${yardage} yds` : ""} · SI {strokeIndex}</div>
@@ -389,7 +428,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               const l = layups.find((x) => x.n === n);
               return (
                 <span key={n} className="inline-flex items-center gap-1 rounded-md bg-brass-soft px-2 py-1 font-semibold text-ink" data-testid="number-chip">
-                  <span className="inline-block h-2 w-2 rounded-full bg-brass" />{l ? `hit ${Math.round(l.distance)} to leave ${n}` : `${n}: pin is inside it`}
+                  <span className="inline-block h-2 w-2 rounded-full bg-brass" />{l ? <>hit {Math.round(l.distance)}<span className="font-normal text-ink-2"> (plays {l.plays})</span> → {n} in<span className="font-normal text-ink-2"> (plays {l.leavePlays})</span></> : `${n}: pin is inside it`}
                 </span>
               );
             })}
@@ -407,7 +446,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           </div>
         )}
         <p className="text-[10px] text-muted">
-          {atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · the view follows you and zooms to what&apos;s left, straight down over the green inside 40 ·{" "}
+          {atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · the view follows you and zooms to what&apos;s left, straight down over the green inside 40 · pinch to zoom ·{" "}
           {tracking ? (aimMode ? "tap the hole to set your aim" : "tap where your ball came to rest, or drag a ball or the aim point to move it (GPS marks it in the app)") : "tap the hole or drag the dot to move (GPS does this in the app)"}
         </p>
         {shots.some((s) => s.aim) && (
