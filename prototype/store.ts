@@ -86,6 +86,9 @@ export function seedState(): State {
   const ld = createSideBet(state, { roundId: round.id, type: "LONGEST_DRIVE_IN_FAIRWAY", description: "Longest drive in the fairway", amountCents: 2000, basis: "GROSS", holeNumbers: [5], opponentIds: ["p_marcus"] }, "p_matt");
   acceptSideBet(state, round.id, ld, "p_marcus");
   createSideBet(state, { roundId: round.id, type: "CLOSEST_TO_PIN", description: "Closest to the pin", amountCents: 1000, basis: "GROSS", holeNumbers: [4], opponentIds: ["p_john"] }, "p_ryan");
+  const hw = createSideBet(state, { roundId: round.id, type: "HOLE_WINNER", description: "Hole winner", amountCents: 1000, basis: "GROSS", holeNumbers: [2], opponentIds: ["p_ryan"] }, "p_matt");
+  acceptSideBet(state, round.id, hw, "p_ryan");
+  resolveSideBet(state, round.id, hw, "AUTO", "p_matt");
   round.groups = [{ name: "Group A", playerIds: ["p_matt", "p_ryan"] }, { name: "Group B", playerIds: ["p_marcus", "p_john"] }];
   // Everyone tracked shots on the holes already played (shots = gross − putts), plus the group ahead on hole 4.
   const tracked: Record<string, number[]> = { p_matt: [2, 2, 2], p_marcus: [3, 3, 2, 2], p_ryan: [3, 3, 2], p_john: [4, 2, 3, 2] };

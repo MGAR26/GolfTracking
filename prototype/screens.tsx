@@ -545,14 +545,18 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
   const betTitle = (t: string) => (t === "LONGEST_DRIVE_IN_FAIRWAY" ? "Long drive" : t === "CLOSEST_TO_PIN" ? "Closest to pin" : t === "HOLE_WINNER" ? "Hole winner" : t.toLowerCase().replace(/_/g, " "));
   const holeNotes = snap.sideBets
-    .filter((b) => b.terms.holeNumbers.includes(holeNumber) && (b.status === "ACCEPTED" || b.status === "PROPOSED") && !(state.dismissedBetNotes ?? []).includes(`${roundId}:${holeNumber}:${b.id}`))
-    .map((b) => ({
-      id: b.id,
-      title: `${betTitle(b.terms.type)} · ${money(b.terms.amountCents)}`,
-      detail: `${b.participants.filter((p) => p.side === "A").map((p) => nameOfId(p.playerId)).join(" & ")} vs ${b.participants.filter((p) => p.side === "B").map((p) => nameOfId(p.playerId)).join(" & ")}${b.status === "PROPOSED" ? " · not accepted yet" : ""}`,
-      tone: b.status === "ACCEPTED" ? ("brass" as const) : ("muted" as const),
-      onDismiss: () => mutate((s) => dismissBetNote(s, roundId, holeNumber, b.id)),
-    }));
+    .filter((b) => b.terms.holeNumbers.includes(holeNumber) && ["ACCEPTED", "PROPOSED", "SETTLED", "VOID"].includes(b.status) && !(state.dismissedBetNotes ?? []).includes(`${roundId}:${holeNumber}:${b.id}`))
+    .map((b) => {
+      const sides = `${b.participants.filter((p) => p.side === "A").map((p) => nameOfId(p.playerId)).join(" & ")} vs ${b.participants.filter((p) => p.side === "B").map((p) => nameOfId(p.playerId)).join(" & ")}`;
+      const won = b.status === "SETTLED" && b.resolution?.winnerPlayerId ? `${nameOfId(b.resolution.winnerPlayerId)} won ${money(b.terms.amountCents)}` : b.status === "VOID" ? "tied · no money" : null;
+      return {
+        id: b.id,
+        title: won ? `${betTitle(b.terms.type)} · ${won}` : `${betTitle(b.terms.type)} · ${money(b.terms.amountCents)}`,
+        detail: `${sides}${b.status === "PROPOSED" ? " · not accepted yet" : ""}`,
+        tone: b.status === "ACCEPTED" ? ("brass" as const) : won ? ("won" as const) : ("muted" as const),
+        onDismiss: () => mutate((s) => dismissBetNote(s, roundId, holeNumber, b.id)),
+      };
+    });
   const me = snap.players.find((p) => p.playerId === state.actorId);
   const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
   const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
@@ -933,6 +937,13 @@ function FinishTab({ snap }: { snap: Snapshot }) {
 
 /** Scorecard strip: every hole across, a row per player, gross / net / both, putts in the corner, money so far. */
 function MiniScorecard({ snap, current, view, onView, onHole }: { snap: Snapshot; current: number; view: ScorecardView; onView: (v: ScorecardView) => void; onHole: (hole: number) => void }) {
+  // Holes with a side bet riding on them: gold while open, grey once settled.
+  const betMark = (hole: number) => {
+    const bets = snap.sideBets.filter((b) => b.terms.holeNumbers.includes(hole) && ["ACCEPTED", "PROPOSED", "SETTLED", "VOID"].includes(b.status));
+    if (!bets.length) return null;
+    const open = bets.some((b) => b.status === "ACCEPTED" || b.status === "PROPOSED");
+    return <span className={`absolute top-0.5 right-0.5 text-[7px] leading-none ${open ? "text-brass" : "text-muted"}`} aria-label={open ? "side bet on this hole" : "side bet settled"}>★</span>;
+  };
   // Nine at a time so nothing is crammed or hidden; follows the hole you're on.
   const [pick, setPick] = useState<{ forHole: number; nine: "front" | "back" } | null>(null);
   const nine: "front" | "back" = pick?.forHole === current ? pick.nine : current <= 9 ? "front" : "back";
@@ -956,7 +967,8 @@ function MiniScorecard({ snap, current, view, onView, onHole }: { snap: Snapshot
             <tr className="text-muted">
               <th className="text-left font-semibold px-1.5 py-1.5 w-[58px]">Hole</th>
               {holes.map((h) => (
-                <th key={h.holeNumber} className={`px-0 py-1.5 text-center font-semibold ${h.holeNumber === current ? "bg-brass-soft text-ink rounded-t-md" : ""}`}>
+                <th key={h.holeNumber} className={`relative px-0 py-1.5 text-center font-semibold ${h.holeNumber === current ? "bg-brass-soft text-ink rounded-t-md" : ""}`}>
+                  {betMark(h.holeNumber)}
                   <button type="button" className="w-full" onClick={() => onHole(h.holeNumber)} aria-label={`Go to hole ${h.holeNumber}`} aria-current={h.holeNumber === current ? "true" : undefined}>{h.holeNumber}</button>
                 </th>
               ))}
