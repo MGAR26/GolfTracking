@@ -1,16 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card } from "./ui";
-import { bagAverages, CLUBS, DEFAULT_CARRY, dispersion, missFromAim, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
+import { CLUBS, missFromAim, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 import { dist, type Pt } from "./holeGeometry";
+import { defaultProfile, dispersionModel, type Bag, type ClubProfile, type DispersionModel, type MissBias, type MissWidth } from "./bag";
 
 const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "putt" ? "Putt" : c === "Dr" ? "Driver" : c);
 
 const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null; const lat = Math.round(Math.abs(m.lateral)), lng = Math.round(Math.abs(m.long)); return `${lat ? `${lat} ${m.lateral > 0 ? "R" : "L"}` : "on line"}${lng ? `, ${lng} ${m.long > 0 ? "long" : "short"}` : ""}`; };
 
-export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
+export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
   shots: Shot[]; tracking: boolean; onToggle: () => void; selectedId: string | null; onSelect: (id: string | null) => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
   /** Yards from the ball to the pin, and the club that fits it. */
-  remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void;
+  remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void; onClubChange?: (club: Shot["club"]) => void; dispersion?: DispersionModel | null;
   onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onHoleOut: (putts: number) => void;
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
 }) {
@@ -20,6 +21,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
   // Club for the next shot: the suggestion unless the player picked one for this exact shot.
   const [pick, setPick] = useState<{ forShot: number; club: Shot["club"] } | null>(null);
   const club = pick?.forShot === shots.length ? pick.club : suggested;
+  useEffect(() => { onClubChange?.(club); }, [club, onClubChange]);
   // Draft text for the distance field so the user can clear it and retype without it snapping back.
   const [draft, setDraft] = useState<{ id: string; text: string } | null>(null);
   const commitDraft = () => {
@@ -57,6 +59,12 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
                 </button>
                 <button type="button" aria-pressed={aimMode} onClick={onAimMode} className={`btn !min-h-12 text-sm whitespace-nowrap ${aimMode ? "btn-primary" : "btn-secondary"}`} data-testid="aim-toggle">{aimMode ? "Tap hole…" : aim ? "Aim ✓" : "Aim"}</button>
               </div>
+              {dispersion && club !== "chip" && club !== "putt" && (
+                <p className="text-[11px] text-ink-2" data-testid="dispersion-line">
+                  Your {clubLabel(club)}: carries {Math.round(dispersion.carry)}{Math.abs(dispersion.center.lateral) >= 2 ? `, tends ${Math.round(Math.abs(dispersion.center.lateral))} ${dispersion.center.lateral > 0 ? "right" : "left"}` : ", straight"}, 8 in 10 inside ±{Math.round(dispersion.sdLateral * 1.8)} yds
+                  <span className="text-muted"> · {dispersion.samples ? `${dispersion.samples} aimed shot${dispersion.samples === 1 ? "" : "s"}` : "from your bag profile"}</span>
+                </p>
+              )}
               <p className="text-[11px] text-muted">
                 On the course GPS marks the spot when you press it. In this demo it drops the ball down the line for the club;{" "}
                 <button type="button" className="text-accent font-semibold" onClick={() => setShowTyped((v) => !v)}>type yards</button> or tap the picture to be exact.
@@ -187,27 +195,49 @@ export function ShotFilterControl({ mode, playerIds, players, me, hasGroups, onC
   );
 }
 
-export function BagCard({ shots, playerId, playerName }: { shots: Shot[]; playerId: string; playerName: string }) {
-  const bag = bagAverages(shots, playerId);
-  const logged = CLUBS.filter((c) => bag[c]);
-  const disp = Object.fromEntries(CLUBS.map((c) => [c, dispersion(shots, playerId, c)])) as Partial<Record<(typeof CLUBS)[number], ReturnType<typeof dispersion>>>;
-  const dispText = (d: NonNullable<ReturnType<typeof dispersion>>) => { const lat = Math.round(d.lateral), lng = Math.round(d.long); return `${lat === 0 ? "on line" : `${Math.abs(lat)} ${lat > 0 ? "R" : "L"}`}${lng ? ` · ${Math.abs(lng)} ${lng > 0 ? "long" : "short"}` : ""}`; };
+export function BagCard({ shots, playerId, playerName, bag, handicapIndex, onProfile }: { shots: Shot[]; playerId: string; playerName: string; bag: Bag; handicapIndex: number; onProfile: (club: Club, profile: ClubProfile | null) => void }) {
+  const [open, setOpen] = useState<Club | null>(null);
+  const models = Object.fromEntries(CLUBS.map((c) => [c, dispersionModel(c, bag, handicapIndex, shots, playerId)])) as Record<Club, DispersionModel>;
+  const set = (c: Club, patch: Partial<ClubProfile>) => onProfile(c, { ...(bag[c] ?? defaultProfile(c, handicapIndex)), ...patch });
+  const missWord = (m: DispersionModel) => (Math.abs(m.center.lateral) < 2 ? "straight" : `${Math.round(Math.abs(m.center.lateral))} ${m.center.lateral > 0 ? "R" : "L"}`);
   return (
-    <Card title={`${playerName} · my bag`} action={<span className="text-xs text-muted">{logged.length ? "from tracked shots" : "defaults until you track"}</span>}>
+    <Card title={`${playerName} · my bag`} action={<span className="text-xs text-muted">tap a club to set it</span>}>
       <div className="grid grid-cols-4 gap-1.5 text-center">
         {CLUBS.map((c) => {
-          const b = bag[c];
+          const m = models[c];
+          const setByYou = !!bag[c];
           return (
-            <div key={c} className={`rounded-lg py-1.5 ${b ? "bg-brass-soft" : "bg-surface-2/60"}`}>
+            <button key={c} type="button" onClick={() => setOpen(open === c ? null : c)} aria-pressed={open === c} className={`rounded-lg py-1.5 ${open === c ? "ring-2 ring-brass" : ""} ${m.samples ? "bg-brass-soft" : setByYou ? "bg-surface-2" : "bg-surface-2/60"}`} data-testid={`bag-${c}`}>
               <p className="text-[10px] uppercase tracking-wide text-muted">{clubLabel(c)}</p>
-              <p className="font-display text-lg leading-tight">{Math.round(b?.avg ?? DEFAULT_CARRY[c])}</p>
-              {b && <p className="text-[9px] text-ink-2">{b.n} shot{b.n === 1 ? "" : "s"}</p>}
-              {disp[c] && <p className="text-[9px] text-brass font-semibold" data-testid={`disp-${c}`}>{dispText(disp[c]!)}</p>}
-            </div>
+              <p className="font-display text-lg leading-tight">{Math.round(m.carry)}</p>
+              <p className="text-[9px] text-ink-2">{missWord(m)} · ±{Math.round(m.sdLateral * 1.8)}</p>
+              <p className="text-[9px] text-muted">{m.samples ? `${m.samples} shot${m.samples === 1 ? "" : "s"}` : setByYou ? "set by you" : "estimate"}</p>
+            </button>
           );
         })}
       </div>
-      <p className="mt-2 text-[11px] text-muted">Median of your logged distances per club. Gold tiles are measured; grey are typical numbers until you have data. The gold line under a club is your average miss from your aim point (right/left, long/short), so the suggestions can adjust for how you actually miss.</p>
+      {open && (() => {
+        const prof = bag[open] ?? defaultProfile(open, handicapIndex);
+        const m = models[open];
+        return (
+          <div className="mt-2 rounded-lg bg-surface-2/50 p-2 flex flex-col gap-2 text-sm" data-testid="club-editor">
+            <div className="flex items-center justify-between">
+              <span className="label !mb-0">{clubLabel(open)}</span>
+              <span className="text-[11px] text-muted">{m.samples ? `${m.samples} aimed shots · ${m.confidence} confidence` : "no aimed shots yet"}</span>
+            </div>
+            <label className="flex items-center gap-2"><span className="w-20 text-muted text-xs">Carry</span>
+              <button type="button" className="tap !min-h-8 !min-w-8 rounded-md bg-surface border border-line-strong text-sm font-bold" aria-label="5 yards shorter" onClick={() => set(open, { carry: Math.max(20, prof.carry - 5) })}>−5</button>
+              <input className="field !min-h-8 w-20 !px-2 text-center" inputMode="numeric" aria-label={`${clubLabel(open)} carry`} value={prof.carry} onChange={(e) => { const n = Number(e.target.value.replace(/\D/g, "")); if (n > 0) set(open, { carry: n }); }} />
+              <button type="button" className="tap !min-h-8 !min-w-8 rounded-md bg-surface border border-line-strong text-sm font-bold" aria-label="5 yards longer" onClick={() => set(open, { carry: prof.carry + 5 })}>+5</button>
+              <span className="text-xs text-muted">yds</span>
+            </label>
+            <div><span className="label">Usual miss</span><div className="seg">{(["left", "straight", "right", "two-way"] as MissBias[]).map((v) => <button key={v} type="button" aria-pressed={prof.miss === v} onClick={() => set(open, { miss: v })} className="!text-xs !min-h-8">{v}</button>)}</div></div>
+            <div><span className="label">How wide</span><div className="seg">{(["narrow", "normal", "wide"] as MissWidth[]).map((v) => <button key={v} type="button" aria-pressed={prof.width === v} onClick={() => set(open, { width: v })} className="!text-xs !min-h-8">{v}</button>)}</div></div>
+            <p className="text-[11px] text-muted">Model: carries {Math.round(m.carry)}, {missWord(m)}, 8 in 10 shots inside ±{Math.round(m.sdLateral * 1.8)} yds and {Math.round(m.sdLong * 1.8)} long/short. Your aimed shots refine this over time.{bag[open] && <> <button type="button" className="text-accent font-semibold" onClick={() => { onProfile(open, null); }}>Reset to estimate</button></>}</p>
+          </div>
+        );
+      })()}
+      <p className="mt-2 text-[11px] text-muted">Gold tiles are measured from aimed shots; grey are your entries or handicap-based estimates. These drive the club suggestion, the dispersion zone on the hole, and the lay-up numbers.</p>
     </Card>
   );
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildHole, bunkerOutlines, compassName, dist, ellipsePath, fairwayOutlines, greenDistances, greenOutline, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, waterOutlines, type Ellipse, type HoleShape, type Pt, type Wind } from "./holeGeometry";
 import { missFromAim, type Shot } from "./shots";
+import { dispersionOutline, expectedLanding, type DispersionModel } from "./bag";
 
 /**
  * Hole card: a perspective rendering from behind wherever you are, looking at the flag,
@@ -109,9 +110,9 @@ export const TRAIL_COLORS = ["#e4572e", "#3a86ff", "#ffd166", "#c77dff", "#00b4d
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [] }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[];
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
@@ -335,6 +336,20 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           })}
           {/* lay-up spots for "your numbers" */}
           {layups.map((l, i) => { const q = view.project(l.point); const left = i % 2 === 1; return <g key={l.n}><circle cx={q.x} cy={q.y} r={4} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1.2} /><text x={left ? q.x - 6 : q.x + 6} y={q.y + 3} textAnchor={left ? "end" : "start"} {...label}>{l.n} in</text></g>; })}
+          {/* personal dispersion for the selected club: 80% zone, 50% core, expected finish */}
+          {dispersion && tracking && (() => {
+            const target = aim ?? flag;
+            const outer = polyPath(view, dispersionOutline(dispersion, pos, target, 0.8));
+            const inner = polyPath(view, dispersionOutline(dispersion, pos, target, 0.5));
+            const e = view.project(expectedLanding(dispersion, pos, target));
+            return (
+              <g data-testid="dispersion" opacity={0.9}>
+                <path d={outer} fill="#b08d3c" fillOpacity={0.22} stroke="#f7f3ea" strokeWidth={1.2} strokeDasharray="3 2" />
+                <path d={inner} fill="#b08d3c" fillOpacity={0.22} stroke="#f7f3ea" strokeWidth={0.8} />
+                {ahead(expectedLanding(dispersion, pos, target)) && <circle cx={e.x} cy={e.y} r={2.2} fill="#f7f3ea" stroke="#b08d3c" strokeWidth={1} />}
+              </g>
+            );
+          })()}
           {/* aim point for the next shot */}
           {aimPt && aim && (
             <g data-testid="aim-marker">

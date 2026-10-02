@@ -15,11 +15,12 @@ import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlem
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
 import { buildHole, buildRealHole, dist, lieAt, type HoleShape, type Pt } from "./holeGeometry";
 import type { RealCourse } from "./osmCourse";
+import { dispersionModel, sampleShot, type Bag, type ClubProfile } from "./bag";
 import pinehurst4Json from "./courses/pinehurst-4.json";
 const PINEHURST_4 = pinehurst4Json as unknown as RealCourse;
-import { bagAverages, DEFAULT_CARRY, isPutt, shotFrom, suggestClub, CLUBS, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
+import { isPutt, shotFrom, suggestClub, CLUBS, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 
-export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[] }
+export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[]; /** Per-club carry and miss profile the player entered. */ bag?: Bag }
 export interface Trip { id: string; name: string; destination: string | null; startDate: string | null; endDate: string | null; ownerId: string; playerIds: string[] }
 export interface Course { id: string; name: string; teeName: string; par: number; courseRating: number; slopeRating: number; holes: HoleInfo[] }
 export interface RoundPlayer { playerId: string; handicapIndexSnapshot: number; courseHandicap: number; playingHandicap: number }
@@ -120,6 +121,17 @@ export function groupMates(round: Round, playerId: string): string[] {
 }
 export function setShotFilter(state: State, filter: ShotFilter) { state.shotFilter = filter; }
 export function setScorecardView(state: State, view: ScorecardView) { state.scorecardView = view; }
+export function setClubProfile(state: State, playerId: string, club: Club, profile: ClubProfile | null) {
+  const p = state.players.find((x) => x.id === playerId);
+  if (!p) return;
+  p.bag ??= {};
+  if (profile) p.bag[club] = profile; else delete p.bag[club];
+}
+/** Dispersion for a player's club: their profile blended with their aimed shots. */
+export function playerDispersion(state: State, round: Round, playerId: string, club: Club) {
+  const p = state.players.find((x) => x.id === playerId)!;
+  return dispersionModel(club, p.bag ?? {}, p.handicapIndex, round.shots ?? [], playerId);
+}
 export function restoreBetNote(state: State, roundId: string, holeNumber: number, betId: string) {
   state.dismissedBetNotes = (state.dismissedBetNotes ?? []).filter((k) => k !== `${roundId}:${holeNumber}:${betId}`);
 }
@@ -454,17 +466,17 @@ export function markBall(state: State, roundId: string, playerId: string, holeNu
   const flag = holeShape(state, round, holeNumber).green.c;
   const target = state.pendingAims?.[aimKey(roundId, playerId, holeNumber)] ?? flag;
   const remaining = dist(from, target);
-  const carry = club === "putt" ? remaining : club === "chip" ? Math.min(remaining, 20) : (bagAverages(round.shots ?? [], playerId)[club]?.avg ?? DEFAULT_CARRY[club]);
-  const reaches = carry >= remaining * 0.85;
-  const d = reaches ? remaining : carry;
-  const len = remaining || 1;
-  const dir = { u: (target.u - from.u) / len, v: (target.v - from.v) / len };
-  // Demo scatter so a shot that reaches the green doesn't land in the cup: a few percent long/short and left/right.
-  const n = prior.length + holeNumber * 7 + playerId.length;
-  const jitter = (k: number) => { const x = Math.sin(n * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
-  const along = d * (1 + (jitter(1) - 0.5) * (reaches ? 0.14 : 0.08));
-  const side = d * (jitter(2) - 0.5) * (reaches ? 0.12 : 0.1);
-  const to = { u: from.u + dir.u * along - dir.v * side, v: from.v + dir.v * along + dir.u * side };
+  const seed = prior.length * 31 + holeNumber * 7 + playerId.length;
+  let to: Pt;
+  if (club === "putt" || club === "chip") {
+    const carry = club === "putt" ? remaining : Math.min(remaining, 20);
+    const len = remaining || 1;
+    to = { u: from.u + ((target.u - from.u) / len) * carry, v: from.v + ((target.v - from.v) / len) * carry };
+  } else {
+    // Demo stand-in for GPS: one draw from the player's own dispersion model for that club.
+    const player = state.players.find((p) => p.id === playerId)!;
+    to = sampleShot(dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId), from, target, seed);
+  }
   return logShot(state, roundId, playerId, holeNumber, to, { club });
 }
 /** Putts are tracked one at a time from the ball's spot: holed, or missed and left `leaveFt` from the hole. */
@@ -482,11 +494,10 @@ export function logPutt(state: State, roundId: string, playerId: string, holeNum
   return logShot(state, roundId, playerId, holeNumber, to, { club: "putt" });
 }
 /** Club whose distance best fits what's left (never longer than the player's longest club). */
-export function clubForRemaining(round: Round, playerId: string, remaining: number): Club | "chip" {
+export function clubForRemaining(state: State, round: Round, playerId: string, remaining: number): Club | "chip" {
   if (remaining < 30) return "chip";
-  const bag = bagAverages(round.shots ?? [], playerId);
   let best: Club = "Dr", bestDiff = Infinity;
-  for (const c of CLUBS) { const diff = Math.abs((bag[c]?.avg ?? DEFAULT_CARRY[c]) - remaining); if (diff < bestDiff) { best = c; bestDiff = diff; } }
+  for (const c of CLUBS) { const diff = Math.abs(playerDispersion(state, round, playerId, c).carry - remaining); if (diff < bestDiff) { best = c; bestDiff = diff; } }
   return best;
 }
 /** Where the player intends the next shot to finish; recorded on that shot when it is logged. */

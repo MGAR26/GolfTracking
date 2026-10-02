@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, setClubProfile, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
@@ -539,6 +539,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const [tracking, setTracking] = useState(false);
   const [aimMode, setAimMode] = useState(false);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+  const [selectedClub, setSelectedClub] = useState<Shot["club"] | null>(null);
+  const onClubChange = useCallback((c: Shot["club"]) => setSelectedClub(c), []);
   // Side bets riding on this hole, as notices on the picture; closing one hides it on this hole for this player.
   const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
   const betTitle = (t: string) => (t === "LONGEST_DRIVE_IN_FAIRWAY" ? "Long drive" : t === "CLOSEST_TO_PIN" ? "Closest to pin" : t === "HOLE_WINNER" ? "Hole winner" : t.toLowerCase().replace(/_/g, " "));
@@ -556,6 +558,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
       };
     });
   const me = snap.players.find((p) => p.playerId === state.actorId);
+  const dispersion = me && tracking && selectedClub && selectedClub !== "chip" && selectedClub !== "putt" ? playerDispersion(state, snap.round, me.playerId, selectedClub) : null;
   const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
   const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
   // Whose trails to overlay: just me by default; group, everyone, or a hand-picked set.
@@ -605,6 +608,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         onAimButton={() => { if (!canTrack) return; if (!tracking) setTracking(true); setAimMode((a) => !a); }}
         shape={holeShapeFor(state, snap.round.courseId, holeNumber)}
         notes={holeNotes}
+        dispersion={dispersion}
       />
       {me && (
         <div className="card !py-2 flex flex-col gap-1.5">
@@ -635,8 +639,10 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           gross={findScore(snap.round, me!.playerId, holeNumber).entry.grossScore}
           remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, holeShapeFor(state, snap.round.courseId, holeNumber).green.c)}
           flag={holeShapeFor(state, snap.round.courseId, holeNumber).green.c}
-          suggested={clubForRemaining(snap.round, me!.playerId, dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, pendingAim(state, roundId, me!.playerId, holeNumber) ?? holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
+          suggested={clubForRemaining(state, snap.round, me!.playerId, dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, pendingAim(state, roundId, me!.playerId, holeNumber) ?? holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
           onMark={(club) => withUndo((s) => { markBall(s, roundId, s.actorId, holeNumber, club); })}
+          onClubChange={onClubChange}
+          dispersion={dispersion}
           onPutt={(leaveFt) => withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, leaveFt); })}
           onUpdate={(id, patch) => withUndo((s) => updateShot(s, roundId, id, patch))}
           onUndo={doUndo}
@@ -774,7 +780,7 @@ function Tile({ label, value, sub }: { label: string; value: string; sub?: strin
   return <div className="rounded-lg bg-surface-2/60 py-2 px-1"><p className="text-[10px] uppercase tracking-wide text-muted">{label}</p><p className="font-display text-xl leading-tight">{value}</p>{sub && <p className="text-[10px] text-ink-2">{sub}</p>}</div>;
 }
 function StatsTab({ snap }: { snap: Snapshot }) {
-  const { state } = useApp();
+  const { state, mutate } = useApp();
   const ordered = [...snap.players].sort((a, b) => (a.playerId === state.actorId ? -1 : b.playerId === state.actorId ? 1 : 0));
   return (
     <Page>
@@ -795,7 +801,7 @@ function StatsTab({ snap }: { snap: Snapshot }) {
           </Card>
         );
       })}
-      <BagCard shots={snap.round.shots ?? []} playerId={state.actorId} playerName={snap.players.find((p) => p.playerId === state.actorId)?.displayName ?? ""} />
+      <BagCard shots={snap.round.shots ?? []} playerId={state.actorId} playerName={snap.players.find((p) => p.playerId === state.actorId)?.displayName ?? ""} bag={state.players.find((p) => p.id === state.actorId)?.bag ?? {}} handicapIndex={state.players.find((p) => p.id === state.actorId)?.handicapIndex ?? 15} onProfile={(club, profile) => mutate((s) => setClubProfile(s, s.actorId, club, profile))} />
       <p className="text-xs text-muted text-center">Percentages only count holes where that stat was entered. Nothing is inferred from the score.</p>
     </Page>
   );
