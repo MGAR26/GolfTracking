@@ -70,7 +70,10 @@ export interface GameDefinition<TRules, TState> {
 export interface RunGameResult<TState> {
   state: TState;
   summary: LiveGameSummary;
+  /** Money to post: only once every hole is in. */
   settlements: GameSettlement[];
+  /** The same settlement as if the round ended now (skins won so far, matches already clinched, current stroke-play leader). */
+  projected: GameSettlement[];
   holesFinalized: number[];
 }
 
@@ -107,6 +110,7 @@ export function runGame<TRules, TState>(
     state,
     summary: def.getLiveSummary(state),
     settlements: roundCtx.isComplete ? def.finalize(roundCtx, state) : [],
+    projected: def.finalize(roundCtx, state),
     holesFinalized,
   };
 }

@@ -127,9 +127,11 @@ export function dismissBetNote(state: State, roundId: string, holeNumber: number
   state.dismissedBetNotes ??= [];
   state.dismissedBetNotes.push(`${roundId}:${holeNumber}:${betId}`);
 }
-/** Money up or down so far this round: projected game settlements as if it ended now. */
+/** Money up or down so far this round: games as if they ended now (posted ones once locked) plus settled side bets. */
 export function liveMoney(snap: Snapshot, playerId: string): number {
-  return snap.games.flatMap((g) => g.settlements).reduce((a, st) => a + (st.toPlayerId === playerId ? st.amountCents : 0) - (st.fromPlayerId === playerId ? st.amountCents : 0), 0);
+  const net = (list: { fromPlayerId: string; toPlayerId: string; amountCents: number }[]) => list.reduce((a, st) => a + (st.toPlayerId === playerId ? st.amountCents : 0) - (st.fromPlayerId === playerId ? st.amountCents : 0), 0);
+  const games = snap.round.status === "LIVE" ? snap.games.flatMap((g) => g.projected) : snap.ledger.filter((e) => e.sourceType === "GAME");
+  return net(games) + net(snap.ledger.filter((e) => e.sourceType === "SIDE_BET"));
 }
 
 /* ---------- trips ---------- */
@@ -318,13 +320,15 @@ export function deleteRound(state: State, roundId: string) {
 }
 
 /* ---------- projections ---------- */
-export interface ProjectedGame { id: string; type: string; name: string; rules: Record<string, unknown>; status: string; teams: GameContext["teams"]; summary: LiveGameSummary; settlements: GameSettlement[]; holesFinalized: number[] }
+export interface ProjectedGame { id: string; type: string; name: string; rules: Record<string, unknown>; status: string; teams: GameContext["teams"]; summary: LiveGameSummary; settlements: GameSettlement[]; /** As if the round ended now. */ projected: GameSettlement[]; holesFinalized: number[] }
 export interface ProjectedSideBet extends StoredSideBet { autoResult: "A" | "B" | "TIE" | null }
 export interface Snapshot {
   round: Round; course: Course; holes: HoleInfo[];
   players: (RoundPlayerInfo & { playingHandicap: number; tripRole: TripRole | null })[];
   entries: HoleEntry[]; totals: Record<string, PlayerRoundTotals>; leaderboardNet: LeaderboardRow[]; leaderboardGross: LeaderboardRow[];
   stats: Record<string, RoundStats>; games: ProjectedGame[]; sideBets: ProjectedSideBet[]; currentHole: number | null; holesComplete: number; nowNotes: string[];
+  /** Ledger entries posted for this round (not reversed). */
+  ledger: LedgerEntry[];
 }
 export function nameOf(state: State, id: string | null | undefined): string {
   return state.players.find((p) => p.id === id)?.name ?? "?";
@@ -351,7 +355,7 @@ export function roundSnapshot(state: State, roundId: string): Snapshot {
   const games: ProjectedGame[] = round.games.map((g) => {
     const ctx: GameContext = { gameId: g.id, holes, players: players.filter((p) => g.participantIds.includes(p.playerId)), teams: g.teams };
     const run = runGame(getGameDefinition(g.type), ctx, g.rules, entries);
-    return { id: g.id, type: g.type, name: g.name, rules: g.rules, status: g.status, teams: g.teams, summary: run.summary, settlements: run.settlements, holesFinalized: run.holesFinalized };
+    return { id: g.id, type: g.type, name: g.name, rules: g.rules, status: g.status, teams: g.teams, summary: run.summary, settlements: run.settlements, projected: run.projected, holesFinalized: run.holesFinalized };
   });
   const allocationFor = (pid: string) => players.find((p) => p.playerId === pid)?.allocation ?? {};
   const sideBets: ProjectedSideBet[] = round.sideBets.map((b) => ({ ...b, autoResult: b.status === "ACCEPTED" ? autoResolve(b, entries, allocationFor) : null }));
@@ -369,7 +373,7 @@ export function roundSnapshot(state: State, roundId: string): Snapshot {
     if (s > 0) nowNotes.push(`${p.displayName} receives ${s === 1 ? "a stroke" : `${s} strokes`}`);
     if (s < 0) nowNotes.push(`${p.displayName} gives ${-s === 1 ? "a stroke" : `${-s} strokes`}`);
   }
-  return { round, course, holes, players, entries, totals, leaderboardNet: buildLeaderboard(lb, "NET"), leaderboardGross: buildLeaderboard(lb, "GROSS"), stats, games, sideBets, currentHole, holesComplete, nowNotes };
+  return { round, course, holes, players, entries, totals, leaderboardNet: buildLeaderboard(lb, "NET"), leaderboardGross: buildLeaderboard(lb, "GROSS"), stats, games, sideBets, currentHole, holesComplete, nowNotes, ledger: state.ledger.filter((e) => e.roundId === roundId && e.status !== "REVERSED") };
 }
 
 export function tripDashboard(state: State, tripId: string) {

@@ -501,9 +501,7 @@ function OverviewTab({ snap }: { snap: Snapshot }) {
         {roundLedger.length === 0 && <p className="text-sm text-muted">{live ? "Projected from live games; nothing is posted until the round is locked." : "No money posted for this round."}</p>}
         <ul className="grid grid-cols-2 gap-2 text-sm mt-1">
           {snap.players.map((p) => {
-            const v = live
-              ? snap.games.flatMap((g) => g.settlements).reduce((a, st) => a + (st.toPlayerId === p.playerId ? st.amountCents : 0) - (st.fromPlayerId === p.playerId ? st.amountCents : 0), 0)
-              : roundLedger.reduce((a, e) => a + (e.toPlayerId === p.playerId ? e.amountCents : 0) - (e.fromPlayerId === p.playerId ? e.amountCents : 0), 0);
+            const v = liveMoney(snap, p.playerId);
             return <li key={p.playerId} className="flex items-center justify-between rounded-lg bg-surface-2/60 px-3 py-2"><span className="font-medium">{p.displayName}</span><span className={`font-semibold ${v > 0 ? "text-ink" : v < 0 ? "text-neg" : "text-muted"}`}>{money(v, { sign: true })}</span></li>;
           })}
         </ul>
@@ -942,6 +940,27 @@ function MiniScorecard({ snap, current, view, onView, onHole, dismissed, onResto
   const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
   const betTitle = (t: string) => (t === "LONGEST_DRIVE_IN_FAIRWAY" ? "Long drive" : t === "CLOSEST_TO_PIN" ? "Closest to pin" : t === "HOLE_WINNER" ? "Hole winner" : t.toLowerCase().replace(/_/g, " "));
   const liveBets = snap.sideBets.filter((b) => ["ACCEPTED", "PROPOSED", "SETTLED", "VOID"].includes(b.status));
+  // Money that can be pinned to a hole: skins (memo names the hole) and single-hole side bets. Nassau,
+  // match play and stroke play settle on segments or the round, so they stay in the name column total.
+  const holeMoney = (playerId: string): Record<number, number> => {
+    const out: Record<number, number> = {};
+    const add = (hole: number, cents: number) => { out[hole] = (out[hole] ?? 0) + cents; };
+    const gameMoney = snap.round.status === "LIVE" ? snap.games.flatMap((g) => g.projected) : snap.ledger.filter((e) => e.sourceType === "GAME");
+    for (const st of gameMoney) {
+      const m = st.memo.match(/Hole (\d+)/);
+      if (!m) continue;
+      if (st.toPlayerId === playerId) add(Number(m[1]), st.amountCents);
+      if (st.fromPlayerId === playerId) add(Number(m[1]), -st.amountCents);
+    }
+    for (const b of snap.sideBets) {
+      if (b.status !== "SETTLED" || b.terms.holeNumbers.length !== 1 || !b.resolution?.winnerSide) continue;
+      const mine = b.participants.find((p) => p.playerId === playerId);
+      if (!mine) continue;
+      const winners = b.participants.filter((p) => p.side === b.resolution!.winnerSide).length, losers = b.participants.length - winners;
+      add(b.terms.holeNumbers[0], mine.side === b.resolution.winnerSide ? b.terms.amountCents * losers : -b.terms.amountCents * winners);
+    }
+    return out;
+  };
   // Holes with a side bet riding on them: gold while open, grey once settled.
   const betMark = (hole: number) => {
     const bets = snap.sideBets.filter((b) => b.terms.holeNumbers.includes(hole) && ["ACCEPTED", "PROPOSED", "SETTLED", "VOID"].includes(b.status));
@@ -992,6 +1011,7 @@ function MiniScorecard({ snap, current, view, onView, onHole, dismissed, onResto
             {snap.players.map((p) => {
               const t = snap.totals[p.playerId];
               const cash = liveMoney(snap, p.playerId);
+              const byHole = holeMoney(p.playerId);
               return (
                 <tr key={p.playerId}>
                   <td className="px-1.5 py-1 whitespace-nowrap border-t border-line align-middle overflow-hidden">
@@ -1004,6 +1024,8 @@ function MiniScorecard({ snap, current, view, onView, onHole, dismissed, onResto
                     return (
                       <td key={h.holeNumber} className={`relative py-1 text-center border-t border-line align-middle ${h.holeNumber === current ? "bg-brass-soft" : ""}`} onClick={() => onHole(h.holeNumber)}>
                         {putts !== null && line?.gross !== null && <span className="absolute top-0.5 right-0.5 text-[7px] leading-none text-muted" aria-label={`${putts} putts`}>{putts}</span>}
+                        {/* money won or lost on this hole (skins, single-hole side bets) */}
+                        {byHole[h.holeNumber] ? <span className={`absolute bottom-0 right-0.5 text-[8px] leading-none font-bold ${byHole[h.holeNumber] > 0 ? "text-brass" : "text-neg"}`} aria-label={`${byHole[h.holeNumber] > 0 ? "won" : "lost"} ${money(Math.abs(byHole[h.holeNumber]))} on this hole`} data-testid="hole-money">$</span> : null}
                         {/* handicap strokes the classic way: one dot per stroke received, in the corner of the cell */}
                         {(line?.strokesReceived ?? 0) !== 0 && (
                           <span className="absolute bottom-0.5 left-0.5 inline-flex gap-px" aria-label={`${Math.abs(line!.strokesReceived)} stroke${Math.abs(line!.strokesReceived) === 1 ? "" : "s"} ${line!.strokesReceived > 0 ? "received" : "given"}`}>
