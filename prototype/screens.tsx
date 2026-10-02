@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
@@ -8,6 +8,8 @@ import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
 import { fetchRealCourse } from "./osmCourse";
+import { recommend, simulate, aimFor } from "./strategy";
+import type { Club } from "./shots";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
   SEED_HOLES, liveMoney, setScorecardView, type ScorecardView, type Snapshot,
@@ -561,6 +563,26 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const dispersion = me && tracking && selectedClub && selectedClub !== "chip" && selectedClub !== "putt" ? playerDispersion(state, snap.round, me.playerId, selectedClub) : null;
   const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
   const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
+  // Strategy: simulate every sensible club and aim from where the ball is (phone-side, a few hundred shots each).
+  const [risk, setRisk] = useState(0);
+  const shapeNow = holeShapeFor(state, snap.round.courseId, holeNumber);
+  const ballNow = myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 };
+  const lastLie = myShots.length ? myShots[myShots.length - 1].lie : null;
+  const bagKey = JSON.stringify(state.players.find((p) => p.id === me?.playerId)?.bag ?? {});
+  const aimNow = me ? pendingAim(state, roundId, me.playerId, holeNumber) : null;
+  const strategyPlan = useMemo(() => {
+    if (!me || !tracking || lastLie === "green" || myShots[myShots.length - 1]?.holed) return null;
+    return recommend((c) => playerDispersion(state, snap.round, me.playerId, c), ballNow, shapeNow.green.c, shapeNow, me.handicapIndex, risk, 400);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.playerId, tracking, lastLie, ballNow.u, ballNow.v, holeNumber, bagKey, myShots.length, risk, snap.round.courseId]);
+  const strategyCurrent = useMemo(() => {
+    if (!me || !dispersion) return null;
+    const aim = aimNow ?? aimFor(ballNow, shapeNow.green.c, dispersion.carry, 0);
+    const len = Math.hypot(shapeNow.green.c.u - ballNow.u, shapeNow.green.c.v - ballNow.v) || 1;
+    const off = ((aim.u - ballNow.u) * -(shapeNow.green.c.v - ballNow.v) + (aim.v - ballNow.v) * (shapeNow.green.c.u - ballNow.u)) / len;
+    return simulate(dispersion, ballNow, aim, shapeNow.green.c, shapeNow, me.handicapIndex, 500, Math.round(off));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [me?.playerId, dispersion, aimNow?.u, aimNow?.v, ballNow.u, ballNow.v, holeNumber, snap.round.courseId]);
   // Whose trails to overlay: just me by default; group, everyone, or a hand-picked set.
   const filter = state.shotFilter ?? { mode: "me" as const, playerIds: [] };
   const palette = snap.players.map((p, i) => ({ playerId: p.playerId, name: p.displayName, color: TRAIL_COLORS[i % TRAIL_COLORS.length] }));
@@ -643,6 +665,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           onMark={(club) => withUndo((s) => { markBall(s, roundId, s.actorId, holeNumber, club); })}
           onClubChange={onClubChange}
           dispersion={dispersion}
+          strategy={{ current: strategyCurrent, plan: strategyPlan, risk, onRisk: setRisk, onPlay: (club: Club, aim) => { setSelectedClub(club); mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, aim)); } }}
           onPutt={(leaveFt) => withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, leaveFt); })}
           onUpdate={(id, patch) => withUndo((s) => updateShot(s, roundId, id, patch))}
           onUndo={doUndo}

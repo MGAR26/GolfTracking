@@ -3,15 +3,18 @@ import { Card } from "./ui";
 import { CLUBS, missFromAim, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 import { dist, type Pt } from "./holeGeometry";
 import { defaultProfile, dispersionModel, type Bag, type ClubProfile, type DispersionModel, type MissBias, type MissWidth } from "./bag";
+import { describeAim, type Outcome, type Play, type Simulation, type Strategy } from "./strategy";
 
 const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "putt" ? "Putt" : c === "Dr" ? "Driver" : c);
 
 const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null; const lat = Math.round(Math.abs(m.lateral)), lng = Math.round(Math.abs(m.long)); return `${lat ? `${lat} ${m.lateral > 0 ? "R" : "L"}` : "on line"}${lng ? `, ${lng} ${m.long > 0 ? "long" : "short"}` : ""}`; };
 
-export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
+export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, strategy, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
   shots: Shot[]; tracking: boolean; onToggle: () => void; selectedId: string | null; onSelect: (id: string | null) => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
   /** Yards from the ball to the pin, and the club that fits it. */
   remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void; onClubChange?: (club: Shot["club"]) => void; dispersion?: DispersionModel | null;
+  /** Odds for the selected club at the current aim, the ranked plays, and the risk slider. */
+  strategy?: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void } | null;
   onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onHoleOut: (putts: number) => void;
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
 }) {
@@ -64,6 +67,9 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
                   Your {clubLabel(club)}: carries {Math.round(dispersion.carry)}{Math.abs(dispersion.center.lateral) >= 2 ? `, tends ${Math.round(Math.abs(dispersion.center.lateral))} ${dispersion.center.lateral > 0 ? "right" : "left"}` : ", straight"}, 8 in 10 inside ±{Math.round(dispersion.sdLateral * 1.8)} yds
                   <span className="text-muted"> · {dispersion.samples ? `${dispersion.samples} aimed shot${dispersion.samples === 1 ? "" : "s"}` : "from your bag profile"}</span>
                 </p>
+              )}
+              {strategy && (strategy.current || strategy.plan) && (
+                <StrategyCard current={strategy.current} plan={strategy.plan} risk={strategy.risk} onRisk={strategy.onRisk} onPlay={(c, a) => { setPick({ forShot: shots.length, club: c }); strategy.onPlay(c, a); }} />
               )}
               <p className="text-[11px] text-muted">
                 On the course GPS marks the spot when you press it. In this demo it drops the ball down the line for the club;{" "}
@@ -158,6 +164,57 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
         </div>
       )}
     </Card>
+  );
+}
+
+const ODDS: { key: Outcome; label: string; color: string }[] = [
+  { key: "fairway", label: "Fairway", color: "#a3c276" }, { key: "green", label: "Green", color: "#9cc873" }, { key: "rough", label: "Rough", color: "#5f7f48" }, { key: "sand", label: "Sand", color: "#cbbb84" }, { key: "water", label: "Water", color: "#6d9fc4" },
+];
+const pct = (x: number) => `${Math.round(x * 100)}%`;
+const playLine = (s: Simulation) => `${s.odds.green >= 0.2 ? `green ${pct(s.odds.green)}` : `fairway ${pct(s.odds.fairway)}`} · water ${pct(s.odds.water)}${s.leave >= 25 ? ` · leaves ${Math.round(s.leave)}` : ""}`;
+
+/** Odds for this club and aim, the three plays, and the Safe ↔ Bold slider. All computed on the phone from the player's bag. */
+export function StrategyCard({ current, plan, risk, onRisk, onPlay }: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void }) {
+  const [open, setOpen] = useState(true);
+  const picked = plan?.recommended;
+  return (
+    <div className="rounded-lg border border-line bg-surface p-2 flex flex-col gap-2" data-testid="strategy-card">
+      <button type="button" className="flex items-center justify-between text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className="label !mb-0">Odds &amp; plays</span>
+        <span className="text-[11px] text-muted">{open ? "hide" : "show"}</span>
+      </button>
+      {open && current && (
+        <div data-testid="outcome">
+          <div className="flex items-baseline justify-between text-[11px] mb-1"><span className="font-semibold">{clubLabel(current.club)} · {describeAim(current.aimOffset)}</span><span className="text-muted">expected {current.expected.toFixed(1)} strokes from here</span></div>
+          <div className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-1 items-center text-[11px]">
+            {ODDS.filter((o) => current.odds[o.key] >= 0.005).map((o) => (
+              <div key={o.key} className="contents">
+                <div className="h-1.5 rounded bg-surface-2 overflow-hidden"><div className="h-full rounded" style={{ width: pct(current.odds[o.key]), background: o.color }} /></div>
+                <div className="whitespace-nowrap">{o.label} <b>{pct(current.odds[o.key])}</b></div>
+              </div>
+            ))}
+          </div>
+          {current.leave >= 25 && <p className="text-[11px] text-muted mt-1">Leaves {Math.round(current.leave)} on average.</p>}
+        </div>
+      )}
+      {open && plan && (
+        <div className="flex flex-col gap-1.5" data-testid="plays">
+          {plan.plays.map((p: Play) => {
+            const isPick = picked && p.sim.club === picked.club && p.sim.aimOffset === picked.aimOffset;
+            return (
+              <button key={p.kind} type="button" onClick={() => onPlay(p.sim.club, p.sim.aim)} className={`grid grid-cols-[auto_1fr_auto] gap-x-2 items-center rounded-lg border px-2 py-1.5 text-left ${isPick ? "border-brass bg-brass-soft" : "border-line bg-surface"}`} data-testid={`play-${p.kind}`} aria-pressed={!!isPick}>
+                <span className={`text-[9px] uppercase tracking-wide font-bold row-span-2 ${isPick ? "text-accent" : "text-ink-2"}`}>{p.kind}</span>
+                <span className="text-[12.5px] font-bold">{clubLabel(p.sim.club)} · {describeAim(p.sim.aimOffset)}</span>
+                <span className="row-span-2 text-right font-display text-lg leading-none">{p.sim.expected.toFixed(1)}<span className="block text-[8px] font-sans font-semibold uppercase tracking-wide text-muted">strokes</span></span>
+                <span className="text-[11px] text-ink-2">{playLine(p.sim)}</span>
+              </button>
+            );
+          })}
+          <label className="flex items-center gap-2 text-[11px] text-muted mt-0.5"><span>Safe</span><input type="range" min={-100} max={100} value={Math.round(risk * 100)} onChange={(e) => onRisk(Number(e.target.value) / 100)} className="flex-1 accent-[var(--brass)]" aria-label="Risk: safe to bold" /><span>Bold</span></label>
+          <p className="text-[10px] text-muted">Tap a play to set that club and aim. Odds come from your bag dropped onto this hole&apos;s real shapes; the slider changes how much a bad miss counts.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
