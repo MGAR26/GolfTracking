@@ -3,7 +3,7 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, setClubProfile, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, setClubProfile, setConditions, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
@@ -631,6 +631,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         shape={holeShapeFor(state, snap.round.courseId, holeNumber)}
         notes={holeNotes}
         dispersion={dispersion}
+        conditions={state.conditions}
+        onConditionsChange={(patch) => mutate((s) => setConditions(s, patch))}
       />
       {me && (
         <div className="card !py-2 flex flex-col gap-1.5">

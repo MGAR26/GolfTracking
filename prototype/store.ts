@@ -13,7 +13,7 @@ import { computeNetBalances, computePairwiseObligations, type LedgerEntry } from
 import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
-import { buildHole, buildRealHole, dist, lieAt, type HoleShape, type Pt } from "./holeGeometry";
+import { buildHole, buildRealHole, dist, lieAt, type Conditions, type HoleShape, type Pt } from "./holeGeometry";
 import type { RealCourse } from "./osmCourse";
 import { dispersionModel, sampleShot, type Bag, type ClubProfile } from "./bag";
 import pinehurst4Json from "./courses/pinehurst-4.json";
@@ -34,7 +34,7 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[] }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions> }
 export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
@@ -121,6 +121,7 @@ export function groupMates(round: Round, playerId: string): string[] {
 }
 export function setShotFilter(state: State, filter: ShotFilter) { state.shotFilter = filter; }
 export function setScorecardView(state: State, view: ScorecardView) { state.scorecardView = view; }
+export function setConditions(state: State, patch: Partial<Conditions>) { state.conditions = { ...(state.conditions ?? {}), ...patch }; }
 export function setClubProfile(state: State, playerId: string, club: Club, profile: ClubProfile | null) {
   const p = state.players.find((x) => x.id === playerId);
   if (!p) return;

@@ -330,14 +330,27 @@ export interface PlaysLike {
   windAdj: number;
   playsLike: number;
   shotBearingDeg: number;
+  /** Each adjustment in yards (+ plays longer), so the breakdown can show its work. */
+  factors: { key: "elevation" | "wind" | "temperature" | "altitude" | "firmness"; label: string; yards: number }[];
+  /** How much to trust the number: measured inputs raise it, guesses lower it. */
+  confidence: "low" | "medium" | "high";
 }
+/** Day conditions the golfer can set; elevation and wind sources say whether they were measured or guessed. */
+export interface Conditions {
+  tempF: number;
+  altitudeFt: number;
+  firmness: "soft" | "normal" | "firm";
+  elevationSource: "measured" | "estimated";
+  windSource: "forecast" | "manual";
+}
+export const DEFAULT_CONDITIONS: Conditions = { tempF: 70, altitudeFt: 0, firmness: "normal", elevationSource: "estimated", windSource: "manual" };
 
 /**
  * Caddie arithmetic, deliberately simple and explainable:
  *  - elevation: 1 yard per 3 feet of rise or fall between here and the green;
  *  - wind: a headwind adds 1% of the shot per mph, a tailwind takes off 0.5% per mph.
  */
-export function playsLike(from: Pt, flag: Pt, holeLength: number, cond: HoleConditions, wind: Wind): PlaysLike {
+export function playsLike(from: Pt, flag: Pt, holeLength: number, cond: HoleConditions, wind: Wind, conditions: Conditions = DEFAULT_CONDITIONS): PlaysLike {
   const distance = dist(from, flag);
   const elevAt = (u: number) => (cond.elevationFt * Math.max(0, Math.min(holeLength, u))) / holeLength;
   const elevationRemainingFt = cond.elevationFt - elevAt(from.u);
@@ -351,7 +364,21 @@ export function playsLike(from: Pt, flag: Pt, holeLength: number, cond: HoleCond
   const headwindMph = -along;
   const crosswindMph = Math.sin((diff * Math.PI) / 180) * wind.mph; // + blows to the right of the shot
   const windAdj = headwindMph > 0 ? distance * 0.01 * headwindMph : distance * 0.005 * headwindMph;
-  return { distance, elevationRemainingFt, elevationAdj, headwindMph, crosswindMph, windAdj, playsLike: distance + elevationAdj + windAdj, shotBearingDeg };
+  // Warm air and altitude both make the ball fly farther (about 1.2% per 10°F, 2% per 1,000 ft), so the shot plays shorter.
+  const tempAdj = -distance * 0.0012 * (conditions.tempF - 70);
+  const altAdj = -distance * 0.02 * (conditions.altitudeFt / 1000);
+  // Firm turf gives rollout on shots that land short of the pin, soft turf takes it away; nothing inside pitching range.
+  const firmAdj = distance < 60 ? 0 : conditions.firmness === "firm" ? -distance * 0.02 : conditions.firmness === "soft" ? distance * 0.02 : 0;
+  const factors: PlaysLike["factors"] = [
+    { key: "elevation", label: Math.abs(elevationRemainingFt) < 2 ? "level" : `${Math.round(Math.abs(elevationRemainingFt))} ft ${elevationRemainingFt > 0 ? "uphill" : "downhill"}`, yards: elevationAdj },
+    { key: "wind", label: Math.abs(headwindMph) < 1 ? "no wind along the shot" : `${Math.round(Math.abs(headwindMph))} mph ${headwindMph > 0 ? "into" : "helping"}`, yards: windAdj },
+  ];
+  if (Math.abs(tempAdj) >= 0.5) factors.push({ key: "temperature", label: `${Math.round(conditions.tempF)}°F`, yards: tempAdj });
+  if (Math.abs(altAdj) >= 0.5) factors.push({ key: "altitude", label: `${Math.round(conditions.altitudeFt).toLocaleString()} ft altitude`, yards: altAdj });
+  if (firmAdj !== 0) factors.push({ key: "firmness", label: `${conditions.firmness} turf`, yards: firmAdj });
+  const measured = (conditions.elevationSource === "measured" ? 1 : 0) + (conditions.windSource === "forecast" ? 1 : 0);
+  const confidence: PlaysLike["confidence"] = measured === 2 ? "high" : measured === 1 ? "medium" : "low";
+  return { distance, elevationRemainingFt, elevationAdj, headwindMph, crosswindMph, windAdj, playsLike: distance + factors.reduce((a, f) => a + f.yards, 0), shotBearingDeg, factors, confidence };
 }
 
 export function tiltWords(t: { u: number; v: number }): string {

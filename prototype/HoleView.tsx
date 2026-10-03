@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildHole, bunkerOutlines, compassName, dist, ellipsePath, fairwayOutlines, greenDistances, greenOutline, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, waterOutlines, type Ellipse, type HoleShape, type Pt, type Wind } from "./holeGeometry";
+import { buildHole, bunkerOutlines, compassName, DEFAULT_CONDITIONS, dist, ellipsePath, fairwayOutlines, greenDistances, greenOutline, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, waterOutlines, type Conditions, type Ellipse, type HoleShape, type Pt, type Wind } from "./holeGeometry";
 import { missFromAim, type Shot } from "./shots";
 import { dispersionOutline, expectedLanding, type DispersionModel } from "./bag";
 
@@ -110,9 +110,9 @@ export const TRAIL_COLORS = ["#e4572e", "#3a86ff", "#ffd166", "#c77dff", "#00b4d
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null;
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
@@ -236,14 +236,15 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const fl = view.project(flag);
   const hazards = hazardDistances(pos, flag, hole).slice(0, 3);
   const fallScreen = (() => { const a = view.project(flag), b = view.project({ u: flag.u + cond.tilt.u * 5, v: flag.v + cond.tilt.v * 5 }); return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90; })();
-  const pl = playsLike(pos, flag, hole.length, cond, wind);
+  const day: Conditions = { ...DEFAULT_CONDITIONS, ...(conditions ?? {}) };
+  const pl = playsLike(pos, flag, hole.length, cond, wind, day);
   // Wind arrow relative to the view: 0° = up the screen (the direction you're facing).
   const shotBearing = pl.shotBearingDeg;
   const windRel = ((wind.fromDeg + 180 - shotBearing) % 360 + 360) % 360;
   const layups = numbers.map((n) => ({ n, ...layupPoint(pos, flag, n) })).filter((l) => l.point).map((l) => {
     const lp = l as { n: number; point: Pt; distance: number };
     // what the lay-up itself plays like (wind + slope along that line), and what the leave plays like from there
-    return { ...lp, plays: Math.round(playsLike(pos, lp.point, hole.length, cond, wind).playsLike), leavePlays: Math.round(playsLike(lp.point, flag, hole.length, cond, wind).playsLike) };
+    return { ...lp, plays: Math.round(playsLike(pos, lp.point, hole.length, cond, wind, day).playsLike), leavePlays: Math.round(playsLike(lp.point, flag, hole.length, cond, wind, day).playsLike) };
   });
   const aimPt = aim ? view.project(aim) : null;
   const aimDist = aim ? dist(pos, aim) : null;
@@ -424,8 +425,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
       <div className="px-3 py-2 border-t border-line flex flex-col gap-2">
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="plays-like-breakdown">
           <span className="font-semibold text-ink">Plays like {Math.round(pl.playsLike)} to the middle</span>
-          <span className="text-ink-2">{Math.abs(pl.elevationRemainingFt) < 2 ? "level" : `${Math.round(Math.abs(pl.elevationRemainingFt))} ft ${pl.elevationRemainingFt > 0 ? "uphill" : "downhill"}`} {fmtAdj(pl.elevationAdj)}</span>
-          <span className="text-ink-2">{Math.abs(pl.headwindMph) < 1 ? "no wind along the shot" : `${Math.round(Math.abs(pl.headwindMph))} mph ${pl.headwindMph > 0 ? "into" : "helping"}`} {fmtAdj(pl.windAdj)}{Math.abs(pl.crosswindMph) >= 3 ? ` · ${Math.round(Math.abs(pl.crosswindMph))} mph across ${pl.crosswindMph > 0 ? "L→R" : "R→L"}` : ""}</span>
+          {pl.factors.map((f) => <span key={f.key} className="text-ink-2">{f.label} {fmtAdj(f.yards)}</span>)}
+          {Math.abs(pl.crosswindMph) >= 3 && <span className="text-ink-2">{Math.round(Math.abs(pl.crosswindMph))} mph across {pl.crosswindMph > 0 ? "L→R" : "R→L"}</span>}
+          <span className={`font-semibold ${pl.confidence === "high" ? "text-brass" : pl.confidence === "medium" ? "text-ink-2" : "text-muted"}`} data-testid="plays-like-confidence">{pl.confidence} confidence</span>
         </div>
         {editWind && (
           <div className="rounded-lg bg-surface-2/70 p-2 flex flex-col gap-2 text-[11px]">
@@ -433,7 +435,12 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             <div className="flex items-center gap-2"><span className="w-16 text-muted">From</span>
               <div className="seg flex-1">{["N", "NE", "E", "SE", "S", "SW", "W", "NW"].map((n, i) => <button key={n} type="button" aria-pressed={compassName(wind.fromDeg) === n} onClick={() => onWindChange({ ...wind, fromDeg: i * 45 })} className="!min-h-8 !text-[11px]">{n}</button>)}</div>
             </div>
-            <span className="text-muted">Wind from {compassName(wind.fromDeg)}. The app reads the hourly forecast for the course; adjust here to see the effect. Hole {holeNumber} plays toward {compassName(cond.bearingDeg)}. Green falls {tiltWords(cond.tilt)}.</span>
+            <label className="flex items-center gap-2"><span className="w-16 text-muted">Temp</span><input type="range" min={35} max={105} value={day.tempF} onChange={(e) => onConditionsChange?.({ tempF: Number(e.target.value) })} className="flex-1 accent-[var(--accent)]" aria-label="Temperature" /><span className="w-14 text-right font-semibold">{day.tempF}°F</span></label>
+            <label className="flex items-center gap-2"><span className="w-16 text-muted">Altitude</span><input type="range" min={0} max={8000} step={250} value={day.altitudeFt} onChange={(e) => onConditionsChange?.({ altitudeFt: Number(e.target.value) })} className="flex-1 accent-[var(--accent)]" aria-label="Altitude" /><span className="w-14 text-right font-semibold">{day.altitudeFt.toLocaleString()} ft</span></label>
+            <div className="flex items-center gap-2"><span className="w-16 text-muted">Turf</span>
+              <div className="seg flex-1">{(["soft", "normal", "firm"] as const).map((f) => <button key={f} type="button" aria-pressed={day.firmness === f} onClick={() => onConditionsChange?.({ firmness: f })} className="!min-h-8 !text-[11px]">{f}</button>)}</div>
+            </div>
+            <span className="text-muted">Wind from {compassName(wind.fromDeg)}, set by you ({pl.confidence} confidence: elevation is {day.elevationSource}, wind is {day.windSource === "forecast" ? "from the forecast" : "manual"}). The app will read the hourly forecast and measured elevation on the course. Hole {holeNumber} plays toward {compassName(cond.bearingDeg)}. Green falls {tiltWords(cond.tilt)}.</span>
           </div>
         )}
         <div className="flex items-center justify-between gap-2 text-[11px]">

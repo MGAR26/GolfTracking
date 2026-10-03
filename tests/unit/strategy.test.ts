@@ -39,3 +39,19 @@ describe("strategy", () => {
     expect(close.odds.green).toBeGreaterThan(0.6);
   });
 });
+
+describe("plays-like factors", () => {
+  it("lists each factor with its yards and says how confident it is", async () => {
+    const { playsLike, holeConditions, DEFAULT_CONDITIONS } = await import("../../prototype/holeGeometry");
+    const cond = { ...holeConditions(4, 4), elevationFt: 0, bearingDeg: 0 };
+    const base = playsLike({ u: 0, v: 0 }, { u: 150, v: 0 }, 400, cond, { mph: 0, fromDeg: 0 });
+    expect(base.confidence).toBe("low");
+    expect(base.playsLike).toBeCloseTo(150, 5);
+    const hot = playsLike({ u: 0, v: 0 }, { u: 150, v: 0 }, 400, cond, { mph: 0, fromDeg: 0 }, { ...DEFAULT_CONDITIONS, tempF: 95, altitudeFt: 5000, firmness: "firm" });
+    expect(hot.playsLike).toBeLessThan(base.playsLike - 15);
+    expect(hot.factors.map((f) => f.key)).toEqual(expect.arrayContaining(["temperature", "altitude", "firmness"]));
+    expect(hot.factors.reduce((a, f) => a + f.yards, 0)).toBeCloseTo(hot.playsLike - 150, 5);
+    const sure = playsLike({ u: 0, v: 0 }, { u: 150, v: 0 }, 400, cond, { mph: 0, fromDeg: 0 }, { ...DEFAULT_CONDITIONS, elevationSource: "measured", windSource: "forecast" });
+    expect(sure.confidence).toBe("high");
+  });
+});
