@@ -26,7 +26,11 @@ interface View {
   horizon: number;
   /** True for the top-down green view (no perspective). */
   overhead: boolean;
+  /** Pixels per yard for the overhead views (undefined in perspective). */
+  scale?: number;
 }
+/** Camera presets: follow the ball (today's view), the whole hole from above, or straight down over the green. */
+export type CameraPreset = "ball" | "hole" | "green";
 /** Inside this many yards of the flag the view switches to straight down over the green. */
 const GREEN_VIEW_YDS = 40;
 
@@ -60,12 +64,12 @@ function makeView(pos: Pt, flag: Pt, green: Ellipse): View {
   return { toView, project, projectView, unproject, near: -camBack + 8, horizon: HORIZON, overhead: false };
 }
 /** Straight down over the green, rotated so the line from you to the flag points up the screen. */
-function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number): View {
+function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number, includeBall = true): View {
   const ru = -fv, rv = fu;
   const toView = (p: Pt): Pt => { const du = p.u - green.c.u, dv = p.v - green.c.v; return { u: du * fu + dv * fv, v: du * ru + dv * rv }; };
   // Fit the whole green AND the ball: zoom out until both sit between the top and bottom overlays.
   const maxR = Math.max(green.ru, green.rv);
-  const ballU = toView(pos).u; // negative: behind the green centre along the line of play
+  const ballU = includeBall ? toView(pos).u : -maxR; // negative: behind the green centre along the line of play
   const high = maxR + 4, low = Math.min(ballU, -maxR) - 4;
   const TOP = 34, BOTTOM = H - 34;
   const s = Math.min((H * 0.62) / (2 * maxR), (BOTTOM - TOP) / (high - low)); // px per yard
@@ -73,8 +77,34 @@ function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number): View {
   const projectView = (q: Pt) => ({ x: CX + q.v * s, y: CY - q.u * s, s });
   const project = (p: Pt) => projectView(toView(p));
   const unproject = (x: number, y: number): Pt => { const vu = (CY - y) / s, vv = (x - CX) / s; return { u: green.c.u + vu * fu + vv * ru, v: green.c.v + vu * fv + vv * rv }; };
-  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true };
+  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true, scale: s };
 }
+/** The whole hole from above, tee at the bottom and the green at the top. */
+/** Picture height for the whole-hole preset: portrait, like a yardage book page. */
+const H_HOLE = 520;
+function wholeHoleView(hole: HoleShape): View {
+  const g = hole.green.c;
+  const L = Math.hypot(g.u, g.v) || 1;
+  const fu = g.u / L, fv = g.v / L, ru = -fv, rv = fu; // up the screen = tee → green centre
+  const toView = (p: Pt): Pt => ({ u: p.u * fu + p.v * fv, v: p.u * ru + p.v * rv });
+  const TOP = 96, BOTTOM = H_HOLE - 28; // below the hole label and camera chips
+  const low = -12, high = L + Math.max(hole.green.ru, hole.green.rv) + 8;
+  const s = Math.min((BOTTOM - TOP) / (high - low), 1.6);
+  const CY = BOTTOM + low * s;
+  const projectView = (q: Pt) => ({ x: CX + q.v * s, y: CY - q.u * s, s });
+  const project = (p: Pt) => projectView(toView(p));
+  const unproject = (x: number, y: number): Pt => { const vu = (CY - y) / s, vv = (x - CX) / s; return { u: vu * fu + vv * ru, v: vu * fv + vv * rv }; };
+  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true, scale: s };
+}
+function presetView(preset: CameraPreset, camPos: Pt, hole: HoleShape): View {
+  const flag = hole.green.c;
+  if (preset === "hole") return wholeHoleView(hole);
+  if (preset === "green") { const d0 = dist(camPos, flag); const fu = d0 > 1 ? (flag.u - camPos.u) / d0 : 1, fv = d0 > 1 ? (flag.v - camPos.v) / d0 : 0; return overheadView(camPos, hole.green, fu, fv, false); }
+  return makeView(camPos, flag, hole.green);
+}
+/** Ease-in-out for the flyover. */
+const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+const FLY_MS = 4200;
 
 /** Clip a polygon (view coords) to the half-space in front of the camera. */
 function clipNear(pts: Pt[], near: number): Pt[] {
@@ -107,7 +137,7 @@ function linePath(view: View, a: Pt, b: Pt): string {
  * the ground is a projective warp, so it is drawn as thin horizontal bands, each placed with the
  * affine that is exact at the band's middle depth (errors stay under a few pixels at the edges).
  */
-function SatelliteLayer({ photo, view, id }: { photo: HolePhoto; view: View; id: string }) {
+function SatelliteLayer({ photo, view, id, coarse = false }: { photo: HolePhoto; view: View; id: string; /** Fewer bands while the camera is moving. */ coarse?: boolean }) {
   const wU = photo.u1 - photo.u0, hV = photo.v1 - photo.v0;
   // image user units are yards: x = u - u0, y = v - v0
   const corner = (x: number, y: number) => view.project({ u: photo.u0 + x, v: photo.v0 + y });
@@ -117,7 +147,7 @@ function SatelliteLayer({ photo, view, id }: { photo: HolePhoto; view: View; id:
     return <image href={photo.src} x={0} y={0} width={wU} height={hV} preserveAspectRatio="none" transform={matrixFrom(corner(0, 0), corner(1, 0), corner(0, 1))} data-testid="satellite" />;
   }
   // Perspective: bands of constant screen height from the top of the frame down to the bottom.
-  const BAND = 5;
+  const BAND = coarse ? 10 : 5;
   const bands: { y0: number; y1: number; m: string }[] = [];
   for (let y0 = 0; y0 < H; y0 += BAND) {
     const y1 = Math.min(H, y0 + BAND), ym = (y0 + y1) / 2;
@@ -205,8 +235,31 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   // While a marker is being dragged the camera stays put, otherwise it would slide under the finger.
   const [frozenPos, setFrozenPos] = useState<Pt | null>(null);
   // Editing an earlier shot? Look at the hole from where that shot started so it is in frame to drag.
-  const camPos = frozenPos ?? (focusShot ? focusShot.from : pos);
-  const view = useMemo(() => makeView(camPos, flag, hole.green), [camPos, flag, hole.green]);
+  const [preset, setPreset] = useState<CameraPreset>("ball");
+  // Flyover: the camera rides the hole line from the tee to the green, then settles back on the ball.
+  const [fly, setFly] = useState<number | null>(null); // 0 … 1 while flying
+  const flyRef = useRef<number | null>(null);
+  const startFly = () => {
+    if (flyRef.current !== null) cancelAnimationFrame(flyRef.current);
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / FLY_MS);
+      setFly(t);
+      if (t < 1) flyRef.current = requestAnimationFrame(step);
+      else { flyRef.current = null; setFly(null); }
+    };
+    flyRef.current = requestAnimationFrame(step);
+  };
+  useEffect(() => () => { if (flyRef.current !== null) cancelAnimationFrame(flyRef.current); }, []);
+  const flyPos: Pt | null = (() => {
+    if (fly === null) return null;
+    const u = ease(fly) * Math.max(0, hole.length - 20);
+    for (let i = 0; i < hole.line.length - 1; i++) { const a = hole.line[i], b = hole.line[i + 1]; if (u >= a.u && u <= b.u) { const f = (u - a.u) / (b.u - a.u || 1); return { u, v: a.v + (b.v - a.v) * f }; } }
+    return hole.line[hole.line.length - 1];
+  })();
+  const camPos = flyPos ?? frozenPos ?? (focusShot ? focusShot.from : pos);
+  const view = flyPos ? makeView(camPos, flag, hole.green) : presetView(preset, camPos, hole); // cheap: a few closures
+  const VH = !flyPos && preset === "hole" ? H_HOLE : H; // the whole-hole preset gets a portrait picture
   const surface = useMemo(() => greenSurface(holeNumber, hole.green, cond.tilt, hole.greenOutline), [holeNumber, hole.green, cond.tilt, hole.greenOutline]);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ kind: "aim" | "shot" | "you"; id?: string; moved: boolean } | null>(null);
@@ -238,8 +291,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   // Pinch zoom: a scale + offset applied to the whole drawing (two fingers to zoom and pan, button to reset).
   const [zoom, setZoom] = useState({ k: 1, tx: 0, ty: 0 });
   const pinchRef = useRef<{ pts: Map<number, { x: number; y: number }>; start?: { d: number; mid: { x: number; y: number }; zoom: { k: number; tx: number; ty: number } } }>({ pts: new Map() });
-  const svgXY = (clientX: number, clientY: number) => { const rect = svgRef.current!.getBoundingClientRect(); return { x: ((clientX - rect.left) / rect.width) * W, y: ((clientY - rect.top) / rect.height) * H }; };
-  const clampZoom = (z: { k: number; tx: number; ty: number }) => { const k = Math.min(2.5, Math.max(1, z.k)); return { k, tx: Math.min(0, Math.max(W - W * k, z.tx)), ty: Math.min(0, Math.max(H - H * k, z.ty)) }; };
+  const svgXY = (clientX: number, clientY: number) => { const rect = svgRef.current!.getBoundingClientRect(); return { x: ((clientX - rect.left) / rect.width) * W, y: ((clientY - rect.top) / rect.height) * VH }; };
+  const clampZoom = (z: { k: number; tx: number; ty: number }) => { const k = Math.min(2.5, Math.max(1, z.k)); return { k, tx: Math.min(0, Math.max(W - W * k, z.tx)), ty: Math.min(0, Math.max(VH - VH * k, z.ty)) }; };
   const onPinchDown = (e: React.PointerEvent<SVGSVGElement>) => {
     const pr = pinchRef.current;
     pr.pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -332,14 +385,14 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   return (
     <div className="card overflow-hidden !p-0" data-testid="hole-view">
       <div className="relative">
-        <svg viewBox={`0 0 ${W} ${H}`} className={`block w-full h-auto select-none ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} onPointerDown={onPinchDown} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} ref={svgRef} style={{ touchAction: "pan-y" }} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
+        <svg viewBox={`0 0 ${W} ${VH}`} className={`block w-full h-auto select-none ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} onPointerDown={onPinchDown} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} ref={svgRef} style={{ touchAction: "pan-y" }} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
           <defs>
             <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8aa66a" /><stop offset="100%" stopColor="#5f7f48" /></linearGradient>
             <linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#a3c276" /><stop offset="100%" stopColor="#8fb463" /></linearGradient>
           </defs>
           <g transform={`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.k})`} data-testid="zoom-layer">
-          <rect width={W} height={H} fill="url(#ground)" />
-          {photo && <SatelliteLayer photo={photo} view={view} id={`sat-${holeNumber}`} />}
+          <rect width={W} height={VH} fill="url(#ground)" />
+          {photo && <SatelliteLayer photo={photo} view={view} id={`sat-${holeNumber}`} coarse={fly !== null} />}
           {waterOutlines(hole).map((w, i) => <path key={`w${i}`} d={polyPath(view, w)} fill="#6d9fc4" fillOpacity={photo ? 0.35 : 1} stroke="#4d7fa6" strokeWidth={1} />)}
           {fairwayOutlines(hole).map((f, i) => <path key={`f${i}`} d={polyPath(view, f)} fill="url(#fw)" fillOpacity={photo ? 0.18 : 1} stroke="#86ab5c" strokeWidth={0.8} strokeOpacity={photo ? 0.7 : 1} />)}
           {bunkerOutlines(hole).map((b, i) => <path key={i} d={polyPath(view, b)} fill="#e8dcb0" fillOpacity={photo ? 0.25 : 1} stroke="#cbbb84" strokeWidth={0.8} />)}
@@ -351,7 +404,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             {surface.cells.map((c, i) => { const h = c.half * 1.04; return <path key={i} d={polyPath(view, [{ u: c.c.u - h, v: c.c.v - h }, { u: c.c.u + h, v: c.c.v - h }, { u: c.c.u + h, v: c.c.v + h }, { u: c.c.u - h, v: c.c.v + h }])} fill={slopeColor(c.pct)} />; })}
           </g>
           {/* downhill arrows: dense straight down over the green, sparse on the approach, none from far out */}
-          {surface.arrows.filter((_, i) => view.overhead || (dist(pos, flag) <= 130 && i % 4 === 0)).map((c, i) => {
+          {surface.arrows.filter((_, i) => (view.overhead ? (view.scale ?? 0) >= 2.5 : dist(pos, flag) <= 130 && i % 4 === 0)).map((c, i) => {
             const len = (view.overhead ? 2.2 : 3.6) * Math.min(1, c.pct / 3);
             const a = view.project(c.c), b = view.project({ u: c.c.u + c.du * len, v: c.c.v + c.dv * len });
             const ang = Math.atan2(b.y - a.y, b.x - a.x);
@@ -381,7 +434,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             );
           }))}
           {/* hazard yardages: a number in the hazard's colour, set off to the side with a thin leader to the edge it measures */}
-          {hazards.flatMap((h) => {
+          {(!view.overhead || (view.scale ?? 0) >= 1.5) && hazards.flatMap((h) => {
             const color = h.kind === "water" ? "#9fd0f0" : h.kind === "bunker" ? "#f1e2a6" : "#b7e29a";
             const out = h.side === "L" ? -1 : 1; // push labels away from the line of play
             // one number for trees, thin hazards, or anything past a full shot; front and carry when depth matters
@@ -452,7 +505,15 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           </>}
           </g>
         </svg>
-        {zoom.k > 1.02 && <button type="button" onClick={() => setZoom({ k: 1, tx: 0, ty: 0 })} className="absolute left-2 top-[110px] rounded-full bg-ink/85 text-[var(--bg)] px-2.5 py-1 text-[11px] font-semibold" data-testid="zoom-reset">{zoom.k.toFixed(1)}× · reset</button>}
+        <div className="absolute left-2 top-[62px] flex items-center gap-1" data-testid="camera-presets" role="group" aria-label="Camera">
+          {(["ball", "hole", "green"] as const).map((p) => (
+            <button key={p} type="button" aria-pressed={preset === p && fly === null} onClick={() => { setPreset(p); setZoom({ k: 1, tx: 0, ty: 0 }); }} className={`rounded-full px-2 py-[3px] text-[10.5px] font-semibold capitalize ${preset === p && fly === null ? "bg-[var(--bg)] text-ink" : "bg-ink/70 text-[var(--bg)]"}`} data-testid={`camera-${p}`}>{p}</button>
+          ))}
+          <button type="button" onClick={startFly} disabled={fly !== null} className="rounded-full pl-1.5 pr-2 py-[3px] text-[10.5px] font-semibold bg-brass text-ink flex items-center gap-0.5 disabled:opacity-70" data-testid="camera-fly" aria-label="Fly over the hole">
+            <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden><path d="M6 4l14 8-14 8z" fill="currentColor" /></svg>{fly === null ? "Fly" : "Flying"}
+          </button>
+        </div>
+        {zoom.k > 1.02 && <button type="button" onClick={() => setZoom({ k: 1, tx: 0, ty: 0 })} className="absolute left-2 top-[92px] rounded-full bg-ink/85 text-[var(--bg)] px-2.5 py-1 text-[11px] font-semibold" data-testid="zoom-reset">{zoom.k.toFixed(1)}× · reset</button>}
         <div className="absolute top-2 left-2 rounded-lg bg-ink/85 text-[var(--bg)] px-2.5 py-1.5 leading-tight">
           <div className="font-display text-xl">Hole {holeNumber}</div>
           <div className="text-[10px] uppercase tracking-wide opacity-85">Par {par}{yardage ? ` · ${yardage} yds` : ""} · SI {strokeIndex}</div>
@@ -550,7 +611,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           </div>
         )}
         <p className="text-[10px] text-muted">
-          {atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · the view follows you and zooms to what&apos;s left, straight down over the green inside 40 · pinch to zoom ·{" "}
+          {atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · Ball follows you and zooms to what&apos;s left (straight down inside 40), Hole shows the whole hole, Green looks straight down on the green, Fly flies tee to green · pinch to zoom ·{" "}
           {hole.photo && <>{photo ? `${photo.attribution} · ` : "drawn layout · "}<button type="button" className="text-accent font-semibold" onClick={() => onSatelliteChange?.(!satellite)} data-testid="satellite-toggle">{photo ? "hide satellite" : "show satellite"}</button> ·{" "}</>}
           {tracking ? (aimMode ? "tap the hole to set your aim" : "tap where your ball came to rest, or drag a ball or the aim point to move it (GPS marks it in the app)") : "tap the hole or drag the dot to move (GPS does this in the app)"}
         </p>
