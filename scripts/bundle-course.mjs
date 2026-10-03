@@ -9,9 +9,15 @@ const elements = readdirSync(dir).filter((f) => f.endsWith(".json")).flatMap((f)
 const seen = new Set();
 const unique = elements.filter((e) => { const k = e.type + e.id; if (seen.has(k)) return false; seen.add(k); return true; });
 const course = mod.courseFromOsm(name, unique);
+let previous = null; try { previous = JSON.parse(readFileSync(out, "utf8")); } catch { /* first run */ }
 const round = (p) => ({ u: Math.round(p.u * 10) / 10, v: Math.round(p.v * 10) / 10 });
 for (const h of Object.values(course.holes)) {
   h.length = Math.round(h.length * 10) / 10; h.bearingDeg = Math.round(h.bearingDeg);
+  if (h.geo) h.geo = { lat: Math.round(h.geo.lat * 1e7) / 1e7, lon: Math.round(h.geo.lon * 1e7) / 1e7, fx: Math.round(h.geo.fx * 1e6) / 1e6, fy: Math.round(h.geo.fy * 1e6) / 1e6 };
+  // keep elevation and photo from a previous bundle when this run has none
+  const prev = previous?.holes?.[h.holeNumber];
+  if (prev?.elevation && !h.elevation) h.elevation = prev.elevation;
+  if (prev?.photo && !h.photo) h.photo = prev.photo;
   h.line = h.line.map(round); h.green = h.green.map(round); h.fairways = h.fairways.map((p) => p.map(round)); h.bunkers = h.bunkers.map((p) => p.map(round)); h.water = h.water.map((p) => p.map(round)); h.trees = h.trees.map(round);
 }
 mkdirSync(out.split("/").slice(0, -1).join("/"), { recursive: true });

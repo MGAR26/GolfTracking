@@ -20,6 +20,22 @@ export interface RealHole {
   trees: Pt[];
   /** Compass bearing tee → green, degrees clockwise from north (for wind). */
   bearingDeg: number;
+  /** Where the hole frame sits on the earth: the frame origin (tee end of the hole line) and the
+   *  unit forward vector in metres east/north, so any lat/lon maps to (u, v) yards and back. */
+  geo?: { lat: number; lon: number; fx: number; fy: number };
+  /** Measured ground height along the line, feet above sea level at u yards from the tee. */
+  elevation?: { u: number; ft: number }[];
+  /** Pre-rendered satellite photo registered to the frame: covers u0…u1 by v0…v1 yards. */
+  photo?: { src: string; u0: number; u1: number; v0: number; v1: number; attribution: string };
+}
+export const YARDS_PER_METER = 1.09361;
+/** Frame (u, v) yards → lat/lon, using the hole's geo registration. */
+export function frameToLatLon(h: RealHole, p: Pt): { lat: number; lon: number } {
+  const g = h.geo!;
+  const mu = p.u / YARDS_PER_METER, mv = p.v / YARDS_PER_METER;
+  const x = mu * g.fx + mv * g.fy, y = mu * g.fy - mv * g.fx; // v is to the right: r = (fy, -fx)
+  const kx = 111320 * Math.cos((g.lat * Math.PI) / 180), ky = 110540;
+  return { lat: g.lat + y / ky, lon: g.lon + x / kx };
 }
 export interface RealCourse { name: string; source: "osm"; fetchedAt: string; holes: Record<number, RealHole> }
 
@@ -171,6 +187,7 @@ export function courseFromOsm(name: string, elements: OsmElement[]): RealCourse 
       water: feats.filter((x) => x.kind === "water_hazard" || x.kind === "lateral_water_hazard").filter((x) => near(x, 90)).map(poly),
       trees: treeNodes.filter((t) => distToPolyline(t, f.pts) < 90).map(toPt),
       bearingDeg: ((Math.atan2(f0.x, f0.y) * 180) / Math.PI + 360) % 360,
+      geo: { lat: origin.lat + start.y / 110540, lon: origin.lon + start.x / (111320 * Math.cos((origin.lat * Math.PI) / 180)), fx: f0.x, fy: f0.y },
     };
   }
   return { name, source: "osm", fetchedAt: new Date().toISOString(), holes };

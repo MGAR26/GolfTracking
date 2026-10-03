@@ -34,7 +34,7 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions> }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean }
 export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
@@ -122,6 +122,8 @@ export function groupMates(round: Round, playerId: string): string[] {
 export function setShotFilter(state: State, filter: ShotFilter) { state.shotFilter = filter; }
 export function setScorecardView(state: State, view: ScorecardView) { state.scorecardView = view; }
 export function setConditions(state: State, patch: Partial<Conditions>) { state.conditions = { ...(state.conditions ?? {}), ...patch }; }
+export const satelliteOn = (state: State) => state.satellite !== false;
+export function setSatellite(state: State, on: boolean) { state.satellite = on; }
 export function setClubProfile(state: State, playerId: string, club: Club, profile: ClubProfile | null) {
   const p = state.players.find((x) => x.id === playerId);
   if (!p) return;

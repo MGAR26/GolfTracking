@@ -27,6 +27,22 @@ export interface HoleShape {
   real?: boolean;
   /** Compass bearing tee → green when known from the map. */
   bearingDeg?: number;
+  /** Measured ground height along the hole (feet above sea level), sampled by distance from the tee. */
+  elevation?: ElevationSample[];
+  /** Pre-rendered satellite photo registered to the frame: covers u0…u1 by v0…v1 yards. */
+  photo?: HolePhoto;
+}
+export interface ElevationSample { u: number; ft: number }
+export interface HolePhoto { src: string; u0: number; u1: number; v0: number; v1: number; attribution: string }
+/** Ground height at a distance from the tee, interpolated along the measured profile. */
+export function elevationAt(profile: ElevationSample[], u: number): number {
+  if (profile.length === 0) return 0;
+  if (u <= profile[0].u) return profile[0].ft;
+  for (let i = 0; i < profile.length - 1; i++) {
+    const a = profile[i], b = profile[i + 1];
+    if (u <= b.u) return a.ft + ((b.ft - a.ft) * (u - a.u)) / (b.u - a.u || 1);
+  }
+  return profile[profile.length - 1].ft;
 }
 /** Outline to draw for the green, and the bunker / water / fairway outlines: real ones when loaded. */
 export const greenOutline = (h: HoleShape) => h.greenOutline ?? ellipsePath(h.green, 36);
@@ -40,12 +56,13 @@ export function fitEllipse(pts: Pt[]): Ellipse {
   return { c, ru, rv, rot: 0 };
 }
 /** A loaded hole (see osmCourse.ts) in the renderer's shape. */
-export function buildRealHole(real: { holeNumber: number; par: number | null; length: number; tee: Pt; line: Pt[]; green: Pt[]; fairways: Pt[][]; bunkers: Pt[][]; water: Pt[][]; trees: Pt[]; bearingDeg?: number }, par: number): HoleShape {
+export function buildRealHole(real: { holeNumber: number; par: number | null; length: number; tee: Pt; line: Pt[]; green: Pt[]; fairways: Pt[][]; bunkers: Pt[][]; water: Pt[][]; trees: Pt[]; bearingDeg?: number; elevation?: ElevationSample[]; photo?: HolePhoto }, par: number): HoleShape {
   const green = fitEllipse(real.green);
   return {
     holeNumber: real.holeNumber, par: real.par ?? par, length: real.length, tee: real.tee, line: real.line.length >= 2 ? real.line : [real.tee, green.c],
     fairway: real.fairways[0] ?? [], green, bunkers: real.bunkers.map(fitEllipse), water: real.water[0] ?? null, trees: real.trees,
     greenOutline: real.green, fairwayOutlines: real.fairways, bunkerOutlines: real.bunkers, waterOutlines: real.water, real: true, bearingDeg: real.bearingDeg,
+    elevation: real.elevation && real.elevation.length >= 2 ? real.elevation : undefined, photo: real.photo,
   };
 }
 
@@ -350,10 +367,11 @@ export const DEFAULT_CONDITIONS: Conditions = { tempF: 70, altitudeFt: 0, firmne
  *  - elevation: 1 yard per 3 feet of rise or fall between here and the green;
  *  - wind: a headwind adds 1% of the shot per mph, a tailwind takes off 0.5% per mph.
  */
-export function playsLike(from: Pt, flag: Pt, holeLength: number, cond: HoleConditions, wind: Wind, conditions: Conditions = DEFAULT_CONDITIONS): PlaysLike {
+export function playsLike(from: Pt, flag: Pt, holeLength: number, cond: HoleConditions, wind: Wind, conditions: Conditions = DEFAULT_CONDITIONS, profile?: ElevationSample[]): PlaysLike {
   const distance = dist(from, flag);
-  const elevAt = (u: number) => (cond.elevationFt * Math.max(0, Math.min(holeLength, u))) / holeLength;
-  const elevationRemainingFt = cond.elevationFt - elevAt(from.u);
+  // Measured profile when the course has one; otherwise the hole's tee→green difference spread evenly.
+  const elevAt = profile ? (u: number) => elevationAt(profile, u) : (u: number) => (cond.elevationFt * Math.max(0, Math.min(holeLength, u))) / holeLength;
+  const elevationRemainingFt = elevAt(flag.u) - elevAt(from.u);
   const elevationAdj = elevationRemainingFt / 3;
   // Shot direction relative to the hole axis, then to compass.
   const rel = (Math.atan2(flag.v - from.v, flag.u - from.u) * 180) / Math.PI;
@@ -376,7 +394,7 @@ export function playsLike(from: Pt, flag: Pt, holeLength: number, cond: HoleCond
   if (Math.abs(tempAdj) >= 0.5) factors.push({ key: "temperature", label: `${Math.round(conditions.tempF)}°F`, yards: tempAdj });
   if (Math.abs(altAdj) >= 0.5) factors.push({ key: "altitude", label: `${Math.round(conditions.altitudeFt).toLocaleString()} ft altitude`, yards: altAdj });
   if (firmAdj !== 0) factors.push({ key: "firmness", label: `${conditions.firmness} turf`, yards: firmAdj });
-  const measured = (conditions.elevationSource === "measured" ? 1 : 0) + (conditions.windSource === "forecast" ? 1 : 0);
+  const measured = (profile || conditions.elevationSource === "measured" ? 1 : 0) + (conditions.windSource === "forecast" ? 1 : 0);
   const confidence: PlaysLike["confidence"] = measured === 2 ? "high" : measured === 1 ? "medium" : "low";
   return { distance, elevationRemainingFt, elevationAdj, headwindMph, crosswindMph, windAdj, playsLike: distance + factors.reduce((a, f) => a + f.yards, 0), shotBearingDeg, factors, confidence };
 }

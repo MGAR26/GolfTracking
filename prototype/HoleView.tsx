@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildHole, bunkerOutlines, compassName, DEFAULT_CONDITIONS, dist, ellipsePath, fairwayOutlines, greenDistances, greenOutline, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, waterOutlines, type Conditions, type Ellipse, type HoleShape, type Pt, type Wind } from "./holeGeometry";
+import { buildHole, bunkerOutlines, compassName, DEFAULT_CONDITIONS, dist, elevationAt, ellipsePath, fairwayOutlines, greenDistances, greenOutline, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, waterOutlines, type Conditions, type ElevationSample, type Ellipse, type HolePhoto, type HoleShape, type Pt, type Wind } from "./holeGeometry";
 import { missFromAim, type Shot } from "./shots";
 import { dispersionOutline, expectedLanding, type DispersionModel } from "./bag";
 
@@ -101,6 +101,85 @@ function linePath(view: View, a: Pt, b: Pt): string {
   return `M${A.x.toFixed(1)} ${A.y.toFixed(1)} L${B.x.toFixed(1)} ${B.y.toFixed(1)}`;
 }
 
+/**
+ * The baked satellite photo under the drawn shapes. The photo is registered to the hole frame
+ * (u along the hole, v to the right). Straight down it is one affine placement; in perspective
+ * the ground is a projective warp, so it is drawn as thin horizontal bands, each placed with the
+ * affine that is exact at the band's middle depth (errors stay under a few pixels at the edges).
+ */
+function SatelliteLayer({ photo, view, id }: { photo: HolePhoto; view: View; id: string }) {
+  const wU = photo.u1 - photo.u0, hV = photo.v1 - photo.v0;
+  // image user units are yards: x = u - u0, y = v - v0
+  const corner = (x: number, y: number) => view.project({ u: photo.u0 + x, v: photo.v0 + y });
+  const matrixFrom = (P0: { x: number; y: number }, P1: { x: number; y: number }, P2: { x: number; y: number }) =>
+    `matrix(${(P1.x - P0.x).toFixed(5)} ${(P1.y - P0.y).toFixed(5)} ${(P2.x - P0.x).toFixed(5)} ${(P2.y - P0.y).toFixed(5)} ${P0.x.toFixed(2)} ${P0.y.toFixed(2)})`;
+  if (view.overhead) {
+    return <image href={photo.src} x={0} y={0} width={wU} height={hV} preserveAspectRatio="none" transform={matrixFrom(corner(0, 0), corner(1, 0), corner(0, 1))} data-testid="satellite" />;
+  }
+  // Perspective: bands of constant screen height from the top of the frame down to the bottom.
+  const BAND = 5;
+  const bands: { y0: number; y1: number; m: string }[] = [];
+  for (let y0 = 0; y0 < H; y0 += BAND) {
+    const y1 = Math.min(H, y0 + BAND), ym = (y0 + y1) / 2;
+    const mid = view.unproject(CX, ym); // world point at the band's middle depth on the centre line
+    const q = view.toView(mid);
+    if (q.u < view.near) break;
+    // local affine: lateral scale at this depth, vertical scale from the depth gradient across the band
+    const a = view.unproject(CX, y0), b = view.unproject(CX, y1);
+    const qa = view.toView(a), qb = view.toView(b);
+    const du = qa.u - qb.u || 1e-6; // view-depth span of the band (far minus near)
+    const pxPerU = (y1 - y0) / du; // screen px per yard of depth (negative direction: farther = higher)
+    // lateral scale from the band's NEAR edge (its largest): the strip then always covers the true
+    // photo region, and the exact outline clip below trims the slight overshoot, so no gaps show
+    const s = view.projectView({ u: qb.u, v: 1 }).x - view.projectView({ u: qb.u, v: 0 }).x; // px per yard laterally
+    const toScreen = (p: Pt) => { const qq = view.toView(p); return { x: CX + qq.v * s, y: ym - (qq.u - q.u) * pxPerU }; };
+    const P0 = toScreen({ u: photo.u0, v: photo.v0 }), P1 = toScreen({ u: photo.u0 + 1, v: photo.v0 }), P2 = toScreen({ u: photo.u0, v: photo.v0 + 1 });
+    bands.push({ y0, y1, m: matrixFrom(P0, P1, P2) });
+  }
+  // Clip the stack of bands to the photo's true projected outline so its edges stay straight.
+  const outline = polyPath(view, [{ u: photo.u0, v: photo.v0 }, { u: photo.u1, v: photo.v0 }, { u: photo.u1, v: photo.v1 }, { u: photo.u0, v: photo.v1 }]);
+  return (
+    <g data-testid="satellite" clipPath={`url(#${id}-outline)`}>
+      <clipPath id={`${id}-outline`}><path d={outline} /></clipPath>
+      {bands.map((bd, i) => (
+        <g key={i} clipPath={`url(#${id}-b${i})`}>
+          <clipPath id={`${id}-b${i}`}><rect x={0} y={bd.y0 - 0.3} width={W} height={bd.y1 - bd.y0 + 0.6} /></clipPath>
+          <image href={photo.src} x={0} y={0} width={wU} height={hV} preserveAspectRatio="none" transform={bd.m} />
+        </g>
+      ))}
+    </g>
+  );
+}
+
+/** Ground profile tee → green with you and the flag marked, and the climb or drop left to the green. */
+function ElevationProfile({ profile, pos, flag, length }: { profile: ElevationSample[]; pos: Pt; flag: Pt; length: number }) {
+  const PW = 400, PH = 40, L = 8, R = 8, T = 6, B = 6;
+  const uMax = Math.max(length, flag.u + 5);
+  const fts = profile.map((p) => p.ft);
+  const lo = Math.min(...fts), hi = Math.max(...fts), span = Math.max(12, hi - lo);
+  const X = (u: number) => L + (Math.max(0, Math.min(uMax, u)) / uMax) * (PW - L - R);
+  const Y = (ft: number) => T + (1 - (ft - lo) / span) * (PH - T - B);
+  const pts = profile.map((p) => `${X(p.u).toFixed(1)},${Y(p.ft).toFixed(1)}`).join(" ");
+  const here = { x: X(pos.u), y: Y(elevationAt(profile, pos.u)) }, pin = { x: X(flag.u), y: Y(elevationAt(profile, flag.u)) };
+  const diff = elevationAt(profile, flag.u) - elevationAt(profile, pos.u);
+  const total = profile[profile.length - 1].ft - profile[0].ft;
+  return (
+    <div className="flex items-center gap-2" data-testid="elevation-profile">
+      <svg viewBox={`0 0 ${PW} ${PH}`} className="block h-10 flex-1" role="img" aria-label={`Elevation profile: ${Math.abs(Math.round(diff))} ft ${diff >= 0 ? "uphill" : "downhill"} to the green`}>
+        <polygon points={`${L},${PH - B} ${pts} ${X(profile[profile.length - 1].u).toFixed(1)},${PH - B}`} fill="#8aa66a" opacity={0.35} />
+        <polyline points={pts} fill="none" stroke="#5f7f48" strokeWidth={1.5} strokeLinejoin="round" />
+        <line x1={here.x} y1={here.y} x2={pin.x} y2={pin.y} stroke="#b08d3c" strokeWidth={1} strokeDasharray="3 2" />
+        <circle cx={pin.x} cy={pin.y} r={3} fill="#7a1f2b" stroke="#f7f3ea" strokeWidth={1} />
+        <circle cx={here.x} cy={here.y} r={3.5} fill="#1b2a41" stroke="#f7f3ea" strokeWidth={1.2} />
+      </svg>
+      <div className="text-[11px] leading-tight text-right whitespace-nowrap">
+        <div className="font-semibold text-ink" data-testid="elevation-to-green">{Math.abs(diff) < 2 ? "level to the green" : `${Math.abs(Math.round(diff))} ft ${diff > 0 ? "uphill" : "downhill"}`}</div>
+        <div className="text-muted">tee→green {total >= 0 ? "+" : "−"}{Math.abs(Math.round(total))} ft · measured</div>
+      </div>
+    </div>
+  );
+}
+
 /** A side bet or game note pinned to this hole. */
 export interface HoleNote { id: string; title: string; detail: string; tone: "brass" | "muted" | "won"; onDismiss: () => void }
 /** Another player's shots on this hole, drawn in their colour. */
@@ -110,14 +189,14 @@ export const TRAIL_COLORS = ["#e4572e", "#3a86ff", "#ffd166", "#c77dff", "#00b4d
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange, satellite = true, onSatelliteChange }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void;
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void; /** Draw the baked satellite photo under the shapes (when the course has one). */ satellite?: boolean; onSatelliteChange?: (on: boolean) => void;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
   const hole = useMemo(() => shape ?? buildHole(holeNumber, par, yardage), [shape, holeNumber, par, yardage]);
-  const cond = useMemo(() => { const c = holeConditions(holeNumber, par); return hole.bearingDeg !== undefined ? { ...c, bearingDeg: hole.bearingDeg } : c; }, [holeNumber, par, hole.bearingDeg]);
+  const cond = useMemo(() => { const c = holeConditions(holeNumber, par); const e = hole.elevation; return { ...c, bearingDeg: hole.bearingDeg ?? c.bearingDeg, elevationFt: e ? Math.round(e[e.length - 1].ft - e[0].ft) : c.elevationFt }; }, [holeNumber, par, hole.bearingDeg, hole.elevation]);
   const [tapPos, setTapPos] = useState<Pt>({ u: 0, v: 0 });
   // While tracking, "you" are wherever the last logged shot came to rest.
   const lastRest = shots.length ? shots[shots.length - 1].to : null;
@@ -152,7 +231,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   };
   const ahead = (p: Pt) => view.toView(p).u > view.near + 2;
   const markers = [100, 150, 200].filter((m) => m < hole.length - 30).map((m) => ({ m, p: pointAlong(m) })).filter(({ p }) => ahead(p));
-  const trees = hole.trees.filter(ahead).sort((a, b) => view.toView(b).u - view.toView(a).u);
+  const photo = satellite && hole.photo ? hole.photo : null;
+  const trees = (photo ? [] : hole.trees).filter(ahead).sort((a, b) => view.toView(b).u - view.toView(a).u);
 
   /** Screen point → world point on the ground, clamped to the hole corridor; null above the horizon. */
   // Pinch zoom: a scale + offset applied to the whole drawing (two fingers to zoom and pan, button to reset).
@@ -237,14 +317,14 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const hazards = hazardDistances(pos, flag, hole).slice(0, 3);
   const fallScreen = (() => { const a = view.project(flag), b = view.project({ u: flag.u + cond.tilt.u * 5, v: flag.v + cond.tilt.v * 5 }); return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90; })();
   const day: Conditions = { ...DEFAULT_CONDITIONS, ...(conditions ?? {}) };
-  const pl = playsLike(pos, flag, hole.length, cond, wind, day);
+  const pl = playsLike(pos, flag, hole.length, cond, wind, day, hole.elevation);
   // Wind arrow relative to the view: 0° = up the screen (the direction you're facing).
   const shotBearing = pl.shotBearingDeg;
   const windRel = ((wind.fromDeg + 180 - shotBearing) % 360 + 360) % 360;
-  const layups = numbers.map((n) => ({ n, ...layupPoint(pos, flag, n) })).filter((l) => l.point).map((l) => {
+  const layups = numbers.map((n) => ({ n, lp: layupPoint(pos, flag, n) })).filter((l) => l.lp && l.lp.distance >= 30).map(({ n, lp }) => ({ n, ...lp })).map((l) => {
     const lp = l as { n: number; point: Pt; distance: number };
     // what the lay-up itself plays like (wind + slope along that line), and what the leave plays like from there
-    return { ...lp, plays: Math.round(playsLike(pos, lp.point, hole.length, cond, wind, day).playsLike), leavePlays: Math.round(playsLike(lp.point, flag, hole.length, cond, wind, day).playsLike) };
+    return { ...lp, plays: Math.round(playsLike(pos, lp.point, hole.length, cond, wind, day, hole.elevation).playsLike), leavePlays: Math.round(playsLike(lp.point, flag, hole.length, cond, wind, day, hole.elevation).playsLike) };
   });
   const aimPt = aim ? view.project(aim) : null;
   const aimDist = aim ? dist(pos, aim) : null;
@@ -259,11 +339,12 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           </defs>
           <g transform={`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.k})`} data-testid="zoom-layer">
           <rect width={W} height={H} fill="url(#ground)" />
-          {waterOutlines(hole).map((w, i) => <path key={`w${i}`} d={polyPath(view, w)} fill="#6d9fc4" stroke="#4d7fa6" strokeWidth={1} />)}
-          {fairwayOutlines(hole).map((f, i) => <path key={`f${i}`} d={polyPath(view, f)} fill="url(#fw)" stroke="#86ab5c" strokeWidth={0.8} />)}
-          {bunkerOutlines(hole).map((b, i) => <path key={i} d={polyPath(view, b)} fill="#e8dcb0" stroke="#cbbb84" strokeWidth={0.8} />)}
+          {photo && <SatelliteLayer photo={photo} view={view} id={`sat-${holeNumber}`} />}
+          {waterOutlines(hole).map((w, i) => <path key={`w${i}`} d={polyPath(view, w)} fill="#6d9fc4" fillOpacity={photo ? 0.35 : 1} stroke="#4d7fa6" strokeWidth={1} />)}
+          {fairwayOutlines(hole).map((f, i) => <path key={`f${i}`} d={polyPath(view, f)} fill="url(#fw)" fillOpacity={photo ? 0.18 : 1} stroke="#86ab5c" strokeWidth={0.8} strokeOpacity={photo ? 0.7 : 1} />)}
+          {bunkerOutlines(hole).map((b, i) => <path key={i} d={polyPath(view, b)} fill="#e8dcb0" fillOpacity={photo ? 0.25 : 1} stroke="#cbbb84" strokeWidth={0.8} />)}
           {!hole.real && <path d={polyPath(view, ellipsePath({ ...hole.green, ru: hole.green.ru + 5, rv: hole.green.rv + 5 }, 36))} fill="#9cc873" opacity={0.7} />}
-          <path d={polyPath(view, greenOutline(hole))} fill="#b3dc8c" stroke="#79a95a" strokeWidth={1} />
+          <path d={polyPath(view, greenOutline(hole))} fill="#b3dc8c" fillOpacity={photo ? 0.3 : 1} stroke="#79a95a" strokeWidth={1} />
           {/* putting-surface slopes: colour by grade, arrows point downhill (overhead view) */}
           <defs><clipPath id={`green-clip-${holeNumber}`}><path d={polyPath(view, greenOutline(hole))} /></clipPath></defs>
           <g clipPath={`url(#green-clip-${holeNumber})`} opacity={view.overhead ? 0.95 : 0.8}>
@@ -423,6 +504,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
         </button>
       </div>
       <div className="px-3 py-2 border-t border-line flex flex-col gap-2">
+        {hole.elevation && <ElevationProfile profile={hole.elevation} pos={pos} flag={flag} length={hole.length} />}
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="plays-like-breakdown">
           <span className="font-semibold text-ink">Plays like {Math.round(pl.playsLike)} to the middle</span>
           {pl.factors.map((f) => <span key={f.key} className="text-ink-2">{f.label} {fmtAdj(f.yards)}</span>)}
@@ -440,7 +522,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             <div className="flex items-center gap-2"><span className="w-16 text-muted">Turf</span>
               <div className="seg flex-1">{(["soft", "normal", "firm"] as const).map((f) => <button key={f} type="button" aria-pressed={day.firmness === f} onClick={() => onConditionsChange?.({ firmness: f })} className="!min-h-8 !text-[11px]">{f}</button>)}</div>
             </div>
-            <span className="text-muted">Wind from {compassName(wind.fromDeg)}, set by you ({pl.confidence} confidence: elevation is {day.elevationSource}, wind is {day.windSource === "forecast" ? "from the forecast" : "manual"}). The app will read the hourly forecast and measured elevation on the course. Hole {holeNumber} plays toward {compassName(cond.bearingDeg)}. Green falls {tiltWords(cond.tilt)}.</span>
+            <span className="text-muted">Wind from {compassName(wind.fromDeg)}, set by you ({pl.confidence} confidence: elevation is {day.elevationSource}, wind is {day.windSource === "forecast" ? "from the forecast" : "manual"}). {hole.elevation ? "Elevation is measured along this hole; the app will add the hourly forecast." : "The app will read the hourly forecast and measured elevation on the course."} Hole {holeNumber} plays toward {compassName(cond.bearingDeg)}. Green falls {tiltWords(cond.tilt)}.</span>
           </div>
         )}
         <div className="flex items-center justify-between gap-2 text-[11px]">
@@ -450,7 +532,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               const l = layups.find((x) => x.n === n);
               return (
                 <span key={n} className="inline-flex items-center gap-1 rounded-md bg-brass-soft px-2 py-1 font-semibold text-ink" data-testid="number-chip">
-                  <span className="inline-block h-2 w-2 rounded-full bg-brass" />{l ? <>hit {Math.round(l.distance)}<span className="font-normal text-ink-2"> (plays {l.plays})</span> → {n} in<span className="font-normal text-ink-2"> (plays {l.leavePlays})</span></> : `${n}: pin is inside it`}
+                  <span className="inline-block h-2 w-2 rounded-full bg-brass" />{l ? <>hit {Math.round(l.distance)}<span className="font-normal text-ink-2"> (plays {l.plays})</span> → {n} in<span className="font-normal text-ink-2"> (plays {l.leavePlays})</span></> : `${n}: pin is ${Math.round(dist(pos, flag))} out`}
                 </span>
               );
             })}
@@ -469,6 +551,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
         )}
         <p className="text-[10px] text-muted">
           {atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · the view follows you and zooms to what&apos;s left, straight down over the green inside 40 · pinch to zoom ·{" "}
+          {hole.photo && <>{photo ? `${photo.attribution} · ` : "drawn layout · "}<button type="button" className="text-accent font-semibold" onClick={() => onSatelliteChange?.(!satellite)} data-testid="satellite-toggle">{photo ? "hide satellite" : "show satellite"}</button> ·{" "}</>}
           {tracking ? (aimMode ? "tap the hole to set your aim" : "tap where your ball came to rest, or drag a ball or the aim point to move it (GPS marks it in the app)") : "tap the hole or drag the dot to move (GPS does this in the app)"}
         </p>
         {shots.some((s) => s.aim) && (

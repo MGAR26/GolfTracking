@@ -3,7 +3,7 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, setClubProfile, setConditions, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
@@ -618,6 +618,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
         onNumbersChange={(n) => mutate((s) => { const me = s.players.find((p) => p.id === s.actorId); if (me) me.favoriteYardages = n; })}
         wind={state.wind ?? { mph: 12, fromDeg: 225 }}
         onWindChange={(w) => mutate((s) => { s.wind = w; })}
+        satellite={satelliteOn(state)}
+        onSatelliteChange={(on) => mutate((s) => setSatellite(s, on))}
         tracking={tracking && canTrack}
         shots={myShots}
         onShot={(to) => withUndo((s) => { logShot(s, roundId, s.actorId, holeNumber, to); })}
@@ -1120,9 +1122,17 @@ function CourseMapCard({ snap }: { snap: Snapshot }) {
   return (
     <Card title="Course map" action={loaded ? <span className="text-xs text-brass font-semibold">{mapped} of {snap.holes.length} holes from the map</span> : <span className="text-xs text-muted">generated layout</span>}>
       {loaded ? (
-        <div className="flex items-center justify-between gap-2 text-sm">
-          <p className="text-ink-2">Hole shapes for <b>{loaded.name}</b> come from OpenStreetMap. Holes it hasn&apos;t mapped fall back to the drawn layout.</p>
-          <button type="button" className="btn btn-secondary !min-h-9 text-xs whitespace-nowrap" onClick={() => mutate((s) => setCourseGeometry(s, snap.round.courseId, null))}>Use drawn</button>
+        <div className="flex flex-col gap-2 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-ink-2">Hole shapes for <b>{loaded.name}</b> come from OpenStreetMap. Holes it hasn&apos;t mapped fall back to the drawn layout.</p>
+            <button type="button" className="btn btn-secondary !min-h-9 text-xs whitespace-nowrap" onClick={() => mutate((s) => setCourseGeometry(s, snap.round.courseId, null))}>Use drawn</button>
+          </div>
+          {Object.values(loaded.holes).some((h) => h.photo) && (
+            <label className="flex items-center justify-between gap-2 rounded-lg bg-surface-2/70 px-3 py-2">
+              <span className="text-ink-2">Satellite photo under each hole <span className="text-muted">· {Object.values(loaded.holes).filter((h) => h.elevation).length} holes with measured elevation</span></span>
+              <input type="checkbox" className="h-5 w-5 accent-[var(--accent)]" checked={satelliteOn(state)} onChange={(e) => mutate((s) => setSatellite(s, e.target.checked))} aria-label="Show satellite photo" data-testid="satellite-checkbox" />
+            </label>
+          )}
         </div>
       ) : (
         <form className="flex flex-col gap-2" onSubmit={(e) => { e.preventDefault(); void load(); }}>

@@ -7,7 +7,7 @@
 import { build } from "esbuild";
 import postcss from "postcss";
 import tailwind from "@tailwindcss/postcss";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
@@ -32,4 +32,7 @@ writeFileSync(path.join(out, "app.css"), result.css);
 
 const html = readFileSync(path.join(root, "prototype", "index.html"), "utf8");
 writeFileSync(path.join(out, "index.html"), html);
+// Baked course imagery (satellite photos per hole) ships next to the bundle.
+const courses = path.join(root, "prototype", "courses");
+if (existsSync(courses)) cpSync(courses, path.join(out, "courses"), { recursive: true, filter: (src) => !src.endsWith(".json") });
 console.log("prototype built →", out);
