@@ -154,6 +154,27 @@ export function dismissBetNote(state: State, roundId: string, holeNumber: number
   state.dismissedBetNotes.push(`${roundId}:${holeNumber}:${betId}`);
 }
 /** Money up or down so far this round: games as if they ended now (posted ones once locked) plus settled side bets. */
+/** Money that can be pinned to a hole, by hole: skins (the memo names the hole) and single-hole side bets.
+ *  Nassau, match play and stroke play settle on segments or the round, so they are not in here. */
+export function holeMoney(snap: Snapshot, playerId: string): Record<number, number> {
+  const out: Record<number, number> = {};
+  const add = (hole: number, cents: number) => { out[hole] = (out[hole] ?? 0) + cents; };
+  const gameMoney = snap.round.status === "LIVE" ? snap.games.flatMap((g) => g.projected) : snap.ledger.filter((e) => e.sourceType === "GAME");
+  for (const st of gameMoney) {
+    const m = st.memo.match(/Hole (\d+)/);
+    if (!m) continue;
+    if (st.toPlayerId === playerId) add(Number(m[1]), st.amountCents);
+    if (st.fromPlayerId === playerId) add(Number(m[1]), -st.amountCents);
+  }
+  for (const b of snap.sideBets) {
+    if (b.status !== "SETTLED" || b.terms.holeNumbers.length !== 1 || !b.resolution?.winnerSide) continue;
+    const mine = b.participants.find((p) => p.playerId === playerId);
+    if (!mine) continue;
+    const winners = b.participants.filter((p) => p.side === b.resolution!.winnerSide).length, losers = b.participants.length - winners;
+    add(b.terms.holeNumbers[0], mine.side === b.resolution.winnerSide ? b.terms.amountCents * losers : -b.terms.amountCents * winners);
+  }
+  return out;
+}
 export function liveMoney(snap: Snapshot, playerId: string): number {
   const net = (list: { fromPlayerId: string; toPlayerId: string; amountCents: number }[]) => list.reduce((a, st) => a + (st.toPlayerId === playerId ? st.amountCents : 0) - (st.fromPlayerId === playerId ? st.amountCents : 0), 0);
   const games = snap.round.status === "LIVE" ? snap.games.flatMap((g) => g.projected) : snap.ledger.filter((e) => e.sourceType === "GAME");

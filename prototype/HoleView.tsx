@@ -105,6 +105,16 @@ function presetView(preset: CameraPreset, camPos: Pt, hole: HoleShape): View {
 /** Ease-in-out for the flyover. */
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 const FLY_MS = 4200;
+/** Point on the hole's centre line at `u` yards from the tee. */
+function pointOnLine(hole: HoleShape, u: number): Pt {
+  for (let i = 0; i < hole.line.length - 1; i++) { const a = hole.line[i], b = hole.line[i + 1]; if (u >= a.u && u <= b.u) { const f = (u - a.u) / (b.u - a.u || 1); return { u, v: a.v + (b.v - a.v) * f }; } }
+  return u <= hole.line[0].u ? hole.line[0] : hole.line[hole.line.length - 1];
+}
+/** Camera for a flyover at progress `t` (0 at the tee, 1 over the green). */
+function flyView(hole: HoleShape, t: number): View {
+  return makeView(pointOnLine(hole, ease(t) * Math.max(0, hole.length - 20)), hole.green.c, hole.green);
+}
+const lerp = (a: Pt, b: Pt, f: number): Pt => ({ u: a.u + (b.u - a.u) * f, v: a.v + (b.v - a.v) * f });
 
 /** Clip a polygon (view coords) to the half-space in front of the camera. */
 function clipNear(pts: Pt[], near: number): Pt[] {
@@ -251,12 +261,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     flyRef.current = requestAnimationFrame(step);
   };
   useEffect(() => () => { if (flyRef.current !== null) cancelAnimationFrame(flyRef.current); }, []);
-  const flyPos: Pt | null = (() => {
-    if (fly === null) return null;
-    const u = ease(fly) * Math.max(0, hole.length - 20);
-    for (let i = 0; i < hole.line.length - 1; i++) { const a = hole.line[i], b = hole.line[i + 1]; if (u >= a.u && u <= b.u) { const f = (u - a.u) / (b.u - a.u || 1); return { u, v: a.v + (b.v - a.v) * f }; } }
-    return hole.line[hole.line.length - 1];
-  })();
+  const flyPos: Pt | null = fly === null ? null : pointOnLine(hole, ease(fly) * Math.max(0, hole.length - 20));
   const camPos = flyPos ?? frozenPos ?? (focusShot ? focusShot.from : pos);
   const view = flyPos ? makeView(camPos, flag, hole.green) : presetView(preset, camPos, hole); // cheap: a few closures
   const VH = !flyPos && preset === "hole" ? H_HOLE : H; // the whole-hole preset gets a portrait picture
@@ -622,5 +627,53 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
         )}
       </div>
     </div>
+  );
+}
+
+/** One player's shots in the replay, with how far through its flight each shot is (0 … 1). */
+export interface ReplayTrail { playerId: string; name: string; color: string; shots: { shot: Shot; progress: number }[] }
+/**
+ * The hole picture for the round replay: a flyover camera at progress `t`, the ground and
+ * satellite photo, the line of play, and every player's shots drawing in as they are "hit".
+ * No controls: the replay drives it frame by frame.
+ */
+export function ReplayScene({ hole, holeNumber, t, trails, satellite = true }: { hole: HoleShape; holeNumber: number; t: number; trails: ReplayTrail[]; satellite?: boolean }) {
+  const view = flyView(hole, t);
+  const flag = hole.green.c;
+  const photo = satellite && hole.photo ? hole.photo : null;
+  const fl = view.project(flag);
+  const ahead = (p: Pt) => view.toView(p).u > view.near + 2;
+  const markers = [100, 150, 200].filter((m) => m < hole.length - 30).map((m) => ({ m, p: pointOnLine(hole, m) })).filter(({ p }) => ahead(p));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="block w-full h-auto select-none" role="img" aria-label={`Replay of hole ${holeNumber}`} data-testid="replay-scene">
+      <defs>
+        <linearGradient id="ground-replay" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8aa66a" /><stop offset="100%" stopColor="#5f7f48" /></linearGradient>
+        <linearGradient id="fw-replay" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#a3c276" /><stop offset="100%" stopColor="#8fb463" /></linearGradient>
+      </defs>
+      <rect width={W} height={H} fill="url(#ground-replay)" />
+      {photo && <SatelliteLayer photo={photo} view={view} id={`replay-sat-${holeNumber}`} coarse />}
+      {waterOutlines(hole).map((w, i) => <path key={`w${i}`} d={polyPath(view, w)} fill="#6d9fc4" fillOpacity={photo ? 0.35 : 1} stroke="#4d7fa6" strokeWidth={1} />)}
+      {fairwayOutlines(hole).map((f, i) => <path key={`f${i}`} d={polyPath(view, f)} fill="url(#fw-replay)" fillOpacity={photo ? 0.18 : 1} stroke="#86ab5c" strokeWidth={0.8} strokeOpacity={photo ? 0.7 : 1} />)}
+      {bunkerOutlines(hole).map((b, i) => <path key={i} d={polyPath(view, b)} fill="#e8dcb0" fillOpacity={photo ? 0.25 : 1} stroke="#cbbb84" strokeWidth={0.8} />)}
+      <path d={polyPath(view, greenOutline(hole))} fill="#b3dc8c" fillOpacity={photo ? 0.3 : 1} stroke="#79a95a" strokeWidth={1} />
+      <path d={linePath(view, { u: 0, v: 0 }, flag)} stroke="#f7f3ea" strokeWidth={1.2} strokeDasharray="4 3" fill="none" opacity={0.7} />
+      {markers.map(({ m, p }) => { const q = view.project(p); return <g key={m}><circle cx={q.x} cy={q.y} r={2.2} fill="#f7f3ea" /><text x={q.x + 5} y={q.y + 3} {...label}>{m}</text></g>; })}
+      <line x1={fl.x} y1={fl.y} x2={fl.x} y2={fl.y - 22 * Math.min(1, fl.s * 3)} stroke="#f7f3ea" strokeWidth={1.3} />
+      <path d={`M${fl.x} ${fl.y - 22 * Math.min(1, fl.s * 3)} l8 3.5 l-8 3.5 z`} fill="#7a1f2b" />
+      {trails.map((tr) => tr.shots.map(({ shot, progress }, i) => {
+        if (progress <= 0) return null;
+        const end = lerp(shot.from, shot.to, progress);
+        const landed = progress >= 1;
+        const isLast = landed && (i === tr.shots.length - 1 || tr.shots[i + 1].progress <= 0);
+        const b = view.project(end);
+        return (
+          <g key={shot.id} data-testid={`replay-trail-${tr.playerId}`}>
+            {ahead(shot.from) && <path d={linePath(view, shot.from, end)} stroke={tr.color} strokeWidth={landed ? 1.2 : 1.8} fill="none" opacity={landed ? 0.85 : 1} />}
+            {ahead(end) && <circle cx={b.x} cy={b.y} r={isLast || !landed ? 4.2 : 2.4} fill={tr.color} stroke="rgba(27,42,65,0.7)" strokeWidth={0.8} />}
+            {ahead(end) && isLast && <text x={b.x} y={b.y + 2.6} textAnchor="middle" fontSize={6.5} fontWeight={800} fill="#1b2a41">{tr.name[0]}</text>}
+          </g>
+        );
+      }))}
+    </svg>
   );
 }

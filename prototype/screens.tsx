@@ -2,8 +2,9 @@ import { Fragment, useCallback, useMemo, useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
+import { RoundReplay, replayableHoles } from "./Replay";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, sgBaseline, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, sgBaseline, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
@@ -434,6 +435,8 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: React
 
 function OverviewTab({ snap }: { snap: Snapshot }) {
   const { state, nav, mutate } = useApp();
+  const [replay, setReplay] = useState(false);
+  const replayHoles = replayableHoles(snap);
   const roundId = snap.round.id;
   const me = snap.players.find((p) => p.playerId === state.actorId);
   const myTotals = me ? snap.totals[me.playerId] : null;
@@ -500,6 +503,15 @@ function OverviewTab({ snap }: { snap: Snapshot }) {
         {snap.sideBets.length > 0 && <p className="text-xs text-ink-2 mt-2">{snap.sideBets.filter((b) => b.status === "PROPOSED").length} pending · {snap.sideBets.filter((b) => b.status === "ACCEPTED").length} open · {snap.sideBets.filter((b) => b.status === "SETTLED").length} settled side bets</p>}
       </Card>
 
+      {replayHoles.length > 0 && (
+        <Card title="Replay" action={<span className="text-xs text-muted">{replayHoles.length} hole{replayHoles.length === 1 ? "" : "s"} so far</span>}>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm text-ink-2">Fly every hole played so far with everyone&apos;s shots landing in order and the money moving hole by hole.</p>
+            <button type="button" className="btn btn-primary !min-h-10 text-sm whitespace-nowrap" onClick={() => setReplay(true)} data-testid="replay-open">Replay round</button>
+          </div>
+        </Card>
+      )}
+      {replay && <RoundReplay snap={snap} onClose={() => setReplay(false)} />}
       <CourseMapCard snap={snap} />
       <Card title="Money position" action={<TextLink className="!text-xs" onClick={() => nav({ name: "money", tripId: snap.round.tripId })}>Trip ledger ›</TextLink>}>
         {roundLedger.length === 0 && <p className="text-sm text-muted">{live ? "Projected from live games; nothing is posted until the round is locked." : "No money posted for this round."}</p>}
@@ -1013,27 +1025,6 @@ function MiniScorecard({ snap, current, view, onView, onHole, dismissed, onResto
   const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
   const betTitle = (t: string) => (t === "LONGEST_DRIVE_IN_FAIRWAY" ? "Long drive" : t === "CLOSEST_TO_PIN" ? "Closest to pin" : t === "HOLE_WINNER" ? "Hole winner" : t.toLowerCase().replace(/_/g, " "));
   const liveBets = snap.sideBets.filter((b) => ["ACCEPTED", "PROPOSED", "SETTLED", "VOID"].includes(b.status));
-  // Money that can be pinned to a hole: skins (memo names the hole) and single-hole side bets. Nassau,
-  // match play and stroke play settle on segments or the round, so they stay in the name column total.
-  const holeMoney = (playerId: string): Record<number, number> => {
-    const out: Record<number, number> = {};
-    const add = (hole: number, cents: number) => { out[hole] = (out[hole] ?? 0) + cents; };
-    const gameMoney = snap.round.status === "LIVE" ? snap.games.flatMap((g) => g.projected) : snap.ledger.filter((e) => e.sourceType === "GAME");
-    for (const st of gameMoney) {
-      const m = st.memo.match(/Hole (\d+)/);
-      if (!m) continue;
-      if (st.toPlayerId === playerId) add(Number(m[1]), st.amountCents);
-      if (st.fromPlayerId === playerId) add(Number(m[1]), -st.amountCents);
-    }
-    for (const b of snap.sideBets) {
-      if (b.status !== "SETTLED" || b.terms.holeNumbers.length !== 1 || !b.resolution?.winnerSide) continue;
-      const mine = b.participants.find((p) => p.playerId === playerId);
-      if (!mine) continue;
-      const winners = b.participants.filter((p) => p.side === b.resolution!.winnerSide).length, losers = b.participants.length - winners;
-      add(b.terms.holeNumbers[0], mine.side === b.resolution.winnerSide ? b.terms.amountCents * losers : -b.terms.amountCents * winners);
-    }
-    return out;
-  };
   // Holes with a side bet riding on them: gold while open, grey once settled.
   const betMark = (hole: number) => {
     const bets = snap.sideBets.filter((b) => b.terms.holeNumbers.includes(hole) && ["ACCEPTED", "PROPOSED", "SETTLED", "VOID"].includes(b.status));
@@ -1084,7 +1075,7 @@ function MiniScorecard({ snap, current, view, onView, onHole, dismissed, onResto
             {snap.players.map((p) => {
               const t = snap.totals[p.playerId];
               const cash = liveMoney(snap, p.playerId);
-              const byHole = holeMoney(p.playerId);
+              const byHole = holeMoney(snap, p.playerId);
               return (
                 <tr key={p.playerId}>
                   <td className="px-1.5 py-1 whitespace-nowrap border-t border-line align-middle overflow-hidden">
