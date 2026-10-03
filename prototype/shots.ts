@@ -27,6 +27,8 @@ export interface Shot {
   aim?: Pt | null;
   /** A putt that dropped: the hole is complete at this shot. */
   holed?: boolean;
+  /** The play chosen before the shot: its club, aim offset and the strokes it promised from here (1 + average leave). */
+  plan?: { club: Club | "chip" | "putt"; aimOffset: number; expected: number } | null;
 }
 export const isPutt = (s: Shot) => s.club === "putt";
 

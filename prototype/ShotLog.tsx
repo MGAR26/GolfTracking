@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { fmtSg, type SgBaseline } from "./strokesGained";
+import type { SgShot, SgTotals } from "../src/domain/strategy/strokesGained";
 import { Card } from "./ui";
 import { CLUBS, missFromAim, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 import { dist, type Pt } from "./holeGeometry";
@@ -9,14 +11,16 @@ const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "putt" ? "
 
 const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null; const lat = Math.round(Math.abs(m.lateral)), lng = Math.round(Math.abs(m.long)); return `${lat ? `${lat} ${m.lateral > 0 ? "R" : "L"}` : "on line"}${lng ? `, ${lng} ${m.long > 0 ? "long" : "short"}` : ""}`; };
 
-export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, strategy, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete }: {
+export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, strategy, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete, sg = null }: {
   shots: Shot[]; tracking: boolean; onToggle: () => void; selectedId: string | null; onSelect: (id: string | null) => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
   /** Yards from the ball to the pin, and the club that fits it. */
   remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void; onClubChange?: (club: Shot["club"]) => void; dispersion?: DispersionModel | null;
   /** Odds for the selected club at the current aim, the ranked plays, and the risk slider. */
-  strategy?: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void } | null;
+  strategy?: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void; planned?: { shots: number; delta: number } | null } | null;
   onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onHoleOut: (putts: number) => void;
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
+  /** Strokes gained per shot on this hole, and the hole's totals, against the chosen baseline. */
+  sg?: { byId: Record<string, SgShot>; totals: SgTotals; baseline: SgBaseline } | null;
 }) {
   const setSelectedId = onSelect;
   const [typed, setTyped] = useState("");
@@ -69,7 +73,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
                 </p>
               )}
               {strategy && (strategy.current || strategy.plan) && (
-                <StrategyCard current={strategy.current} plan={strategy.plan} risk={strategy.risk} onRisk={strategy.onRisk} onPlay={(c, a) => { setPick({ forShot: shots.length, club: c }); strategy.onPlay(c, a); }} />
+                <StrategyCard current={strategy.current} plan={strategy.plan} risk={strategy.risk} onRisk={strategy.onRisk} planned={strategy.planned ?? sg?.totals.planned ?? null} onPlay={(c, a) => { setPick({ forShot: shots.length, club: c }); strategy.onPlay(c, a); }} />
               )}
               <p className="text-[11px] text-muted">
                 On the course GPS marks the spot when you press it. In this demo it drops the ball down the line for the club;{" "}
@@ -107,12 +111,19 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
             <li key={sh.id} className={`flex items-center gap-1 rounded-md -mx-1 ${tracking && editing?.id === sh.id ? "bg-brass-soft" : ""}`}>
               <button type="button" onClick={() => setSelectedId(sh.id === selectedId ? null : sh.id)} className="flex-1 min-w-0 text-left py-1.5 flex items-center justify-between gap-2 px-1" aria-label={`Edit shot ${sh.seq}`}>
                 <span className="truncate"><span className="text-muted mr-1">{sh.seq}.</span><span className="font-semibold">{clubLabel(sh.club)}</span> <span className="text-ink-2">{sh.club === "putt" ? `${Math.round(dist(sh.from, flag) * 3)} ft` : Math.round(sh.distance)}</span>{sh.club === "putt" ? <span className="text-muted">{sh.holed ? " · holed" : ` → ${Math.round(dist(sh.to, flag) * 3)} ft left`}</span> : sh.lie ? <span className="text-muted"> → {sh.lie}</span> : null}{sh.shape || sh.trajectory ? <span className="text-muted"> · {[sh.trajectory, sh.shape].filter(Boolean).join(" ")}</span> : null}{sh.aim ? <span className="text-brass"> · {missText(sh)}</span> : null}</span>
+                {sg?.byId[sh.id] && <SgChip value={sg.byId[sh.id].gained} title={`${sgTitle(sg.byId[sh.id])} · ${fmtSg(sg.byId[sh.id].gained, 2)} vs ${sg.baseline === "scratch" ? "scratch" : "your handicap"}`} />}
                 {tracking && <span className="text-[11px] font-semibold text-accent shrink-0">{editing?.id === sh.id ? "done" : "edit"}</span>}
               </button>
               {tracking && <button type="button" className="tap !min-h-8 !min-w-8 rounded-md text-muted hover:text-neg text-lg leading-none" aria-label={`Remove shot ${sh.seq}`} onClick={() => { onDelete(sh.id); if (selectedId === sh.id) setSelectedId(null); }}>×</button>}
             </li>
           ))}
         </ol>
+      )}
+      {sg && shots.length > 0 && (
+        <p className="mt-1.5 text-[11px] text-ink-2 flex flex-wrap gap-x-2" data-testid="sg-hole">
+          <span>Strokes gained this hole <b className={sg.totals.total < -0.05 ? "text-neg" : "text-ink"}>{fmtSg(sg.totals.total)}</b> vs {sg.baseline === "scratch" ? "scratch" : "your handicap"}</span>
+          {sg.totals.planned.shots > 0 && <span className="text-muted">· plan vs actual {fmtSg(sg.totals.planned.delta)} over {sg.totals.planned.shots} planned shot{sg.totals.planned.shots === 1 ? "" : "s"}</span>}
+        </p>
       )}
       {tracking && editing && (
         <div className="mt-2 flex flex-col gap-2 rounded-lg bg-surface-2/50 p-2" data-testid="shot-editor">
@@ -174,7 +185,15 @@ const pct = (x: number) => `${Math.round(x * 100)}%`;
 const playLine = (s: Simulation) => `${s.odds.green >= 0.2 ? `green ${pct(s.odds.green)}` : `fairway ${pct(s.odds.fairway)}`} · water ${pct(s.odds.water)}${s.leave >= 25 ? ` · leaves ${Math.round(s.leave)}` : ""}`;
 
 /** Odds for this club and aim, the three plays, and the Safe ↔ Bold slider. All computed on the phone from the player's bag. */
-export function StrategyCard({ current, plan, risk, onRisk, onPlay }: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void }) {
+/** Small +0.3 / −0.8 badge: brass when the shot gained, claret when it cost. */
+function SgChip({ value, title }: { value: number; title: string }) {
+  const tone = value > 0.05 ? "bg-brass-soft text-ink" : value < -0.05 ? "bg-neg-soft text-neg" : "bg-surface-2 text-muted";
+  return <span className={`shrink-0 rounded-md px-1.5 py-0.5 text-[10.5px] font-bold tabular-nums ${tone}`} title={title} data-testid="sg-chip">{fmtSg(value)}</span>;
+}
+const CATEGORY_WORDS = { tee: "off the tee", approach: "approach", around: "around the green", putting: "putting" } as const;
+const sgTitle = (s: SgShot) => `${CATEGORY_WORDS[s.category]}: ${s.before.toFixed(2)} expected from here, ${s.after.toFixed(2)} after`;
+
+export function StrategyCard({ current, plan, risk, onRisk, onPlay, planned = null }: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void; /** Plan-vs-actual so far on this hole. */ planned?: { shots: number; delta: number } | null }) {
   const [open, setOpen] = useState(true);
   const picked = plan?.recommended;
   return (
@@ -212,6 +231,7 @@ export function StrategyCard({ current, plan, risk, onRisk, onPlay }: { current:
           })}
           <label className="flex items-center gap-2 text-[11px] text-muted mt-0.5"><span>Safe</span><input type="range" min={-100} max={100} value={Math.round(risk * 100)} onChange={(e) => onRisk(Number(e.target.value) / 100)} className="flex-1 accent-[var(--brass)]" aria-label="Risk: safe to bold" /><span>Bold</span></label>
           <p className="text-[10px] text-muted">Tap a play to set that club and aim. Odds come from your bag dropped onto this hole&apos;s real shapes; the slider changes how much a bad miss counts.</p>
+          {planned && planned.shots > 0 && <p className="text-[11px] text-ink-2" data-testid="plan-vs-actual">Plan vs actual this hole: <b className={planned.delta < -0.05 ? "text-neg" : "text-ink"}>{fmtSg(planned.delta)}</b> over {planned.shots} planned shot{planned.shots === 1 ? "" : "s"} <span className="text-muted">(what the chosen play promised minus what the shot left)</span></p>}
         </div>
       )}
     </div>

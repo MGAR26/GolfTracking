@@ -1,14 +1,16 @@
-import { useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, sgBaseline, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist } from "./holeGeometry";
 import { fetchRealCourse } from "./osmCourse";
 import { recommend, simulate, aimFor } from "./strategy";
+import { fmtSg, holeStrokesGained, roundStrokesGained } from "./strokesGained";
+import { SG_CATEGORIES, STROKES_GAINED_VERSION } from "../src/domain/strategy/strokesGained";
 import type { Club } from "./shots";
 import {
   acceptSideBet, createRound, createSideBet, createTrip, declineSideBet, findScore, finishProblems, finishRound, nameOf, reopenRound, resolveSideBet, roundSnapshot, saveScore, tripDashboard, tripRole,
@@ -575,6 +577,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
     return recommend((c) => playerDispersion(state, snap.round, me.playerId, c), ballNow, shapeNow.green.c, shapeNow, me.handicapIndex, risk, 400);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.playerId, tracking, lastLie, ballNow.u, ballNow.v, holeNumber, bagKey, myShots.length, risk, snap.round.courseId]);
+  const mySg = me ? holeStrokesGained(myShots, shapeNow.green.c, hole.par, me.handicapIndex, sgBaseline(state)) : null;
   const strategyCurrent = useMemo(() => {
     if (!me || !dispersion) return null;
     const aim = aimNow ?? aimFor(ballNow, shapeNow.green.c, dispersion.carry, 0);
@@ -666,7 +669,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, holeShapeFor(state, snap.round.courseId, holeNumber).green.c)}
           flag={holeShapeFor(state, snap.round.courseId, holeNumber).green.c}
           suggested={clubForRemaining(state, snap.round, me!.playerId, dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, pendingAim(state, roundId, me!.playerId, holeNumber) ?? holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
-          onMark={(club) => withUndo((s) => { markBall(s, roundId, s.actorId, holeNumber, club); })}
+          onMark={(club) => withUndo((s) => { markBall(s, roundId, s.actorId, holeNumber, club, strategyCurrent && strategyCurrent.club === club ? { club, aimOffset: strategyCurrent.aimOffset, expected: strategyCurrent.expected } : null); })}
           onClubChange={onClubChange}
           dispersion={dispersion}
           strategy={{ current: strategyCurrent, plan: strategyPlan, risk, onRisk: setRisk, onPlay: (club: Club, aim) => { setSelectedClub(club); mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, aim)); } }}
@@ -680,6 +683,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           onAddDistance={(yds) => withUndo((s) => { addShotByDistance(s, roundId, s.actorId, holeNumber, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c); })}
           onSetDistance={(id, yds) => withUndo((s) => setShotDistance(s, roundId, id, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
           onDelete={(id) => withUndo((s) => deleteShot(s, roundId, id))}
+          sg={mySg ? { ...mySg, baseline: sgBaseline(state) } : null}
         />
       )}
       {snap.round.status !== "LIVE" && <p className="text-sm text-muted text-center">This round is locked. Scores are read-only.</p>}
@@ -828,9 +832,45 @@ function StatsTab({ snap }: { snap: Snapshot }) {
           </Card>
         );
       })}
+      <StrokesGainedCard snap={snap} />
       <BagCard shots={snap.round.shots ?? []} playerId={state.actorId} playerName={snap.players.find((p) => p.playerId === state.actorId)?.displayName ?? ""} bag={state.players.find((p) => p.id === state.actorId)?.bag ?? {}} handicapIndex={state.players.find((p) => p.id === state.actorId)?.handicapIndex ?? 15} onProfile={(club, profile) => mutate((s) => setClubProfile(s, s.actorId, club, profile))} />
       <p className="text-xs text-muted text-center">Percentages only count holes where that stat was entered. Nothing is inferred from the score.</p>
     </Page>
+  );
+}
+
+/** Strokes gained for every player who tracked shots, by category, against the chosen baseline. */
+function StrokesGainedCard({ snap }: { snap: Snapshot }) {
+  const { state, mutate } = useApp();
+  const baseline = sgBaseline(state);
+  const rows = snap.players.map((p) => {
+    const holes = snap.holes.map((h) => ({ shots: holeShots(snap.round, p.playerId, h.holeNumber), flag: holeShapeFor(state, snap.round.courseId, h.holeNumber).green.c, par: h.par }));
+    const tracked = holes.filter((h) => h.shots.length > 0).length;
+    return { p, tracked, sg: roundStrokesGained(holes, p.handicapIndex, baseline) };
+  }).filter((r) => r.tracked > 0);
+  const cell = (n: number, shots = 1) => <td className={`py-1.5 text-right tabular-nums font-semibold ${shots === 0 ? "text-muted" : n < -0.05 ? "text-neg" : n > 0.05 ? "text-ink" : "text-muted"}`}>{shots === 0 ? "–" : fmtSg(n)}</td>;
+  return (
+    <Card title="Strokes gained" action={<span className="text-xs text-muted">from tracked shots</span>}>
+      <div className="seg mb-2" data-testid="sg-baseline">
+        <button type="button" aria-pressed={baseline === "handicap"} onClick={() => mutate((s) => setSgBaseline(s, "handicap"))} className="!min-h-9 !text-xs">vs my handicap</button>
+        <button type="button" aria-pressed={baseline === "scratch"} onClick={() => mutate((s) => setSgBaseline(s, "scratch"))} className="!min-h-9 !text-xs">vs scratch</button>
+      </div>
+      {rows.length === 0 ? <p className="text-sm text-muted">Nobody has tracked shots yet. Turn on shot tracking on a hole and every shot gets a number.</p> : (
+        <table className="w-full text-xs" data-testid="sg-table">
+          <thead><tr className="text-[10px] uppercase tracking-wide text-muted"><th className="text-left py-1 font-semibold">Player</th><th className="text-right py-1 font-semibold">Total</th>{SG_CATEGORIES.map((c) => <th key={c.key} className="text-right py-1 font-semibold">{c.key === "tee" ? "Tee" : c.key === "approach" ? "App" : c.key === "around" ? "ARG" : "Putt"}</th>)}<th className="text-right py-1 font-semibold">Plan</th></tr></thead>
+          <tbody>
+            {rows.map(({ p, tracked, sg }) => (
+              <tr key={p.playerId} className="border-t border-line" data-testid={`sg-row-${p.playerId}`}>
+                <td className="py-1.5"><span className="font-semibold">{p.displayName}</span><span className="text-muted"> · {tracked} hole{tracked === 1 ? "" : "s"}</span></td>
+                {cell(sg.total)}{SG_CATEGORIES.map((c) => <Fragment key={c.key}>{cell(sg.byCategory[c.key], sg.shotsByCategory[c.key])}</Fragment>)}
+                <td className="py-1.5 text-right tabular-nums text-ink-2">{sg.planned.shots ? fmtSg(sg.planned.delta) : "–"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <p className="text-[10px] text-muted mt-2">Each shot: strokes a {baseline === "scratch" ? "scratch golfer" : "player of your handicap"} needs from where it started, minus from where it finished, minus one. Tee = tee shots on par 4s and 5s, App = 100+ yards out, ARG = inside 100, Putt = on the green. A dash means no shots of that kind were tracked (putts count once they are tracked as putts). Plan = what the chosen play promised minus what the shot left (always on your own handicap). Benchmark {STROKES_GAINED_VERSION}.</p>
+    </Card>
   );
 }
 

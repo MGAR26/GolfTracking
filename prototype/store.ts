@@ -14,6 +14,8 @@ import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
 import { buildHole, buildRealHole, dist, lieAt, type Conditions, type HoleShape, type Pt } from "./holeGeometry";
+import type { SgBaseline } from "./strokesGained";
+import { expectedStrokes } from "../src/domain/strategy/expectedStrokes";
 import type { RealCourse } from "./osmCourse";
 import { dispersionModel, sampleShot, type Bag, type ClubProfile } from "./bag";
 import pinehurst4Json from "./courses/pinehurst-4.json";
@@ -34,7 +36,7 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean; /** Strokes gained shown against the player's own handicap or scratch. */ sgBaseline?: SgBaseline }
 export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
@@ -110,7 +112,14 @@ function seedHoleShots(state: State, round: Round, playerId: string, holeNumber:
       ? { u: green.u + (rnd(i) - 0.5) * 22, v: green.v + (rnd(i + 50) - 0.5) * 26 }
       : { u: from.u + Math.min(remaining - 40, 150 + rnd(i) * 130), v: from.v + (rnd(i + 50) - 0.5) * 60 };
     const l = lieAt(shape, to);
-    round.shots.push({ id: `seed_${playerId}_${holeNumber}_${i}`, ...shotFrom(from, to, playerId, holeNumber, i, round.shots), lie: last ? "green" : l === "water" ? "rough" : l });
+    const shot: Shot = { id: `seed_${playerId}_${holeNumber}_${i}`, ...shotFrom(from, to, playerId, holeNumber, i, round.shots), lie: last ? "green" : l === "water" ? "rough" : l };
+    if (playerId === state.actorId) {
+      // the play Matt "chose" before each seeded shot: priced like the benchmark from that spot
+      const hcp = state.players.find((p) => p.id === playerId)?.handicapIndex ?? 0;
+      const startLie = i === 1 ? "tee" : (round.shots.find((x) => x.id === `seed_${playerId}_${holeNumber}_${i - 1}`)?.lie ?? "fairway");
+      shot.plan = { club: shot.club, aimOffset: 0, expected: expectedStrokes({ distanceYards: remaining, lie: startLie === "fringe" ? "fairway" : startLie, handicapIndex: hcp }) };
+    }
+    round.shots.push(shot);
     from = to;
   }
 }
@@ -123,6 +132,8 @@ export function setShotFilter(state: State, filter: ShotFilter) { state.shotFilt
 export function setScorecardView(state: State, view: ScorecardView) { state.scorecardView = view; }
 export function setConditions(state: State, patch: Partial<Conditions>) { state.conditions = { ...(state.conditions ?? {}), ...patch }; }
 export const satelliteOn = (state: State) => state.satellite !== false;
+export const sgBaseline = (state: State): SgBaseline => state.sgBaseline ?? "handicap";
+export function setSgBaseline(state: State, b: SgBaseline) { state.sgBaseline = b; }
 export function setSatellite(state: State, on: boolean) { state.satellite = on; }
 export function setClubProfile(state: State, playerId: string, club: Club, profile: ClubProfile | null) {
   const p = state.players.find((x) => x.id === playerId);
@@ -425,7 +436,7 @@ export function holeShots(round: Round, playerId: string, holeNumber: number): S
   return (round.shots ?? []).filter((s) => s.playerId === playerId && s.holeNumber === holeNumber).sort((a, b) => a.seq - b.seq);
 }
 /** "I'm here": the ball came to rest at `to`; the previous rest point (or the tee) is where the shot started. */
-export function logShot(state: State, roundId: string, playerId: string, holeNumber: number, to: Pt, opts: { club?: Shot["club"]; holed?: boolean } = {}): Shot {
+export function logShot(state: State, roundId: string, playerId: string, holeNumber: number, to: Pt, opts: { club?: Shot["club"]; holed?: boolean; plan?: Shot["plan"] } = {}): Shot {
   const round = state.rounds.find((r) => r.id === roundId)!;
   round.shots ??= [];
   const prior = holeShots(round, playerId, holeNumber);
@@ -436,6 +447,7 @@ export function logShot(state: State, roundId: string, playerId: string, holeNum
   shot.lie = autoLie(state, round, holeNumber, to);
   if (opts.club) shot.club = opts.club;
   if (opts.holed) shot.holed = true;
+  if (opts.plan) shot.plan = opts.plan;
   round.shots.push(shot);
   if (state.pendingAims) delete state.pendingAims[key];
   resyncTrackedScore(state, roundId, playerId, holeNumber);
@@ -462,7 +474,7 @@ function autoLie(state: State, round: Round, holeNumber: number, p: Pt): Lie {
 }
 /** One-tap tracking: "I'm at my ball". GPS supplies the spot on the course; here the ball is placed
  *  down the line toward the aim (or the flag) at the club's distance, or at the pin if the club reaches. */
-export function markBall(state: State, roundId: string, playerId: string, holeNumber: number, club: Shot["club"]): Shot {
+export function markBall(state: State, roundId: string, playerId: string, holeNumber: number, club: Shot["club"], plan: Shot["plan"] = null): Shot {
   const round = state.rounds.find((r) => r.id === roundId)!;
   const prior = holeShots(round, playerId, holeNumber);
   const from = prior.length ? prior[prior.length - 1].to : { u: 0, v: 0 };
@@ -480,7 +492,7 @@ export function markBall(state: State, roundId: string, playerId: string, holeNu
     const player = state.players.find((p) => p.id === playerId)!;
     to = sampleShot(dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId), from, target, seed);
   }
-  return logShot(state, roundId, playerId, holeNumber, to, { club });
+  return logShot(state, roundId, playerId, holeNumber, to, { club, plan });
 }
 /** Putts are tracked one at a time from the ball's spot: holed, or missed and left `leaveFt` from the hole. */
 export function logPutt(state: State, roundId: string, playerId: string, holeNumber: number, leaveFt: number | null): Shot {
