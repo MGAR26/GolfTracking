@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { seedState, type State } from "./store";
+import { addPastPinehurstRounds, PAST_TRIP_ID, seedState, type State } from "./store";
 
 /* ---------- routing ---------- */
 export type RoundTab = "overview" | "score" | "scorecard" | "games" | "stats" | "finish";
@@ -28,7 +28,12 @@ const NAV_STORAGE = "gto-proto:nav:v3";
 function load(): State {
   try {
     const raw = window.localStorage.getItem(STORAGE);
-    if (raw) return JSON.parse(raw) as State;
+    if (raw) {
+      const saved = JSON.parse(raw) as State;
+      // older saved demos predate last year's rounds; add them without touching anything else
+      if (!saved.trips.some((t) => t.id === PAST_TRIP_ID)) { addPastPinehurstRounds(saved); try { window.localStorage.setItem(STORAGE, JSON.stringify(saved)); } catch { /* convenience only */ } }
+      return saved;
+    }
   } catch {
     /* fall through */
   }

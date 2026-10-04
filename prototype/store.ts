@@ -96,10 +96,11 @@ export function seedState(): State {
   // Everyone tracked shots on the holes already played (shots = gross − putts), plus the group ahead on hole 4.
   const tracked: Record<string, number[]> = { p_matt: [2, 2, 2], p_marcus: [3, 3, 2, 2], p_ryan: [3, 3, 2], p_john: [4, 2, 3, 2] };
   Object.entries(tracked).forEach(([pid, counts], pi) => counts.forEach((n, hi) => seedHoleShots(state, round, pid, hi + 1, n, pi * 7 + hi)));
+  addPastPinehurstRounds(state);
   return state;
 }
 /** Deterministic, plausible rest points for a seeded hole: long shots first, last one on or beside the green. */
-function seedHoleShots(state: State, round: Round, playerId: string, holeNumber: number, n: number, salt: number) {
+function seedHoleShots(state: State, round: Round, playerId: string, holeNumber: number, n: number, salt: number, kinds: NonNullable<Shot["plan"]>["kind"][] | null = playerId === state.actorId ? [] : null) {
   const shape = holeShapeFor(state, round.courseId, holeNumber);
   const green = shape.green.c;
   const rnd = (i: number) => { const x = Math.sin(salt * 97.3 + i * 13.7 + holeNumber * 3.1) * 10000; return x - Math.floor(x); };
@@ -113,15 +114,96 @@ function seedHoleShots(state: State, round: Round, playerId: string, holeNumber:
       : { u: from.u + Math.min(remaining - 40, 150 + rnd(i) * 130), v: from.v + (rnd(i + 50) - 0.5) * 60 };
     const l = lieAt(shape, to);
     const shot: Shot = { id: `seed_${playerId}_${holeNumber}_${i}`, ...shotFrom(from, to, playerId, holeNumber, i, round.shots), lie: last ? "green" : l === "water" ? "rough" : l };
-    if (playerId === state.actorId) {
+    if (kinds) {
       // the play Matt "chose" before each seeded shot: priced like the benchmark from that spot
       const hcp = state.players.find((p) => p.id === playerId)?.handicapIndex ?? 0;
       const startLie = i === 1 ? "tee" : (round.shots.find((x) => x.id === `seed_${playerId}_${holeNumber}_${i - 1}`)?.lie ?? "fairway");
-      shot.plan = { club: shot.club, aimOffset: 0, expected: expectedStrokes({ distanceYards: remaining, lie: startLie === "fringe" ? "fairway" : startLie, handicapIndex: hcp }) };
+      shot.plan = { club: shot.club, aimOffset: 0, expected: expectedStrokes({ distanceYards: remaining, lie: startLie === "fringe" ? "fairway" : startLie, handicapIndex: hcp }), kind: kinds[i - 1] ?? "balanced" };
     }
     round.shots.push(shot);
     from = to;
   }
+}
+/** Tee club, carry and spray for each strategy (par 4s and 5s); par 3s use the club for the distance. */
+const TEE_PLAY = { safe: { club: "Hy" as Club, carry: 205, spray: 10 }, balanced: { club: "3W" as Club, carry: 230, spray: 16 }, attack: { club: "Dr" as Club, carry: 262, spray: 26 } };
+/**
+ * One remembered hole played to a plan: the tee shot follows the strategy (attack = driver long and
+ * wild, safe = hybrid short and straight), par 5s lay up to a wedge, a bogey adds a recovery shot,
+ * and the last full shot finishes on the green. Every full shot records the play it came from.
+ */
+function seedPlannedHole(state: State, round: Round, playerId: string, holeNumber: number, tee: "safe" | "balanced" | "attack", extra: number, salt: number) {
+  const shape = holeShapeFor(state, round.courseId, holeNumber);
+  const green = shape.green.c;
+  const par = state.courses.find((c) => c.id === round.courseId)!.holes.find((x) => x.holeNumber === holeNumber)!.par;
+  const hcp = state.players.find((p) => p.id === playerId)?.handicapIndex ?? 0;
+  const rnd = (i: number) => { const x = Math.sin(salt * 91.7 + i * 17.3 + holeNumber * 5.9) * 10000; return x - Math.floor(x); };
+  const along = (u: number): Pt => {
+    for (let i = 0; i < shape.line.length - 1; i++) { const a = shape.line[i], b = shape.line[i + 1]; if (u >= a.u && u <= b.u) { const f = (u - a.u) / (b.u - a.u || 1); return { u, v: a.v + (b.v - a.v) * f }; } }
+    return shape.line[shape.line.length - 1];
+  };
+  const targets: { to: Pt; club?: Club; kind: "safe" | "balanced" | "attack" }[] = [];
+  if (par >= 4) {
+    const t = TEE_PLAY[tee];
+    const p = along(Math.min(t.carry + (rnd(1) - 0.4) * 18, shape.length - 60));
+    targets.push({ to: { u: p.u, v: p.v + (rnd(2) - 0.5) * 2 * t.spray }, club: t.club, kind: tee });
+    if (extra) { const q = along(Math.min(targets[0].to.u + 70, shape.length - 110)); targets.push({ to: { u: q.u, v: q.v + (rnd(3) - 0.5) * 12 }, kind: "safe" }); } // punch back to the fairway
+    if (par === 5) { const q = along(shape.length - 95 - rnd(4) * 20); targets.push({ to: { u: q.u, v: q.v + (rnd(5) - 0.5) * 14 }, kind: tee === "attack" ? "attack" : "safe" }); }
+  } else if (extra) {
+    targets.push({ to: { u: green.u - 18 - rnd(6) * 8, v: green.v + (rnd(7) - 0.5) * 24 }, kind: tee }); // missed the green short
+  }
+  targets.push({ to: { u: green.u + (rnd(8) - 0.5) * 2 * Math.max(3, shape.green.ru * 0.5), v: green.v + (rnd(9) - 0.5) * 2 * Math.max(3, shape.green.rv * 0.5) }, kind: par === 3 && !extra ? tee : "balanced" });
+  round.shots ??= [];
+  let from: Pt = { u: 0, v: 0 };
+  targets.forEach((tg, i) => {
+    const last = i === targets.length - 1;
+    const base = shotFrom(from, tg.to, playerId, holeNumber, i + 1, round.shots!);
+    const l = lieAt(shape, tg.to);
+    const startLie = i === 0 ? "tee" : (round.shots!.find((x) => x.id === `past_${round.id}_${holeNumber}_${i}`)?.lie ?? "fairway");
+    round.shots!.push({
+      id: `past_${round.id}_${holeNumber}_${i + 1}`, ...base, club: tg.club ?? base.club, lie: last ? "green" : l === "water" ? "rough" : l,
+      plan: { club: tg.club ?? base.club, aimOffset: 0, expected: expectedStrokes({ distanceYards: dist(from, green), lie: startLie === "fringe" ? "fairway" : startLie, handicapIndex: hcp }), kind: tg.kind },
+    });
+    from = tg.to;
+  });
+}
+/**
+ * Last year's trip: two locked rounds on Pinehurst No. 4, so course memory has something to show.
+ * The actor's shots are tracked with the play they chose off each tee; everyone else has scores.
+ * Safe to call on an existing saved demo: it does nothing once the trip is there.
+ */
+export const PAST_TRIP_ID = "t_pinehurst_2025";
+export function addPastPinehurstRounds(state: State) {
+  const course = state.courses.find((c) => c.id === "c_pinehurst4");
+  const ids = ["p_matt", "p_marcus", "p_ryan", "p_john"];
+  if (!course || state.trips.some((t) => t.id === PAST_TRIP_ID) || !ids.every((id) => state.players.some((p) => p.id === id))) return;
+  state.trips.push({ id: PAST_TRIP_ID, name: "Pinehurst Trip 2025", destination: "Pinehurst, NC", startDate: "2025-10-10", endDate: "2025-10-12", ownerId: "p_matt", playerIds: ids });
+  const actor = state.actorId;
+  state.actorId = "p_matt"; // the scorer enters everything, as on the day
+  const KINDS = ["safe", "balanced", "attack"] as const;
+  [["Round 1", "2025-10-10T09:00", 0], ["Round 3", "2025-10-12T08:40", 1]].forEach(([name, startsAt, r]) => {
+    const roundId = createRound(state, { tripId: PAST_TRIP_ID, courseId: course.id, name: name as string, startsAt: startsAt as string, countsTowardTrip: true, scoringMode: "HYBRID", scorerPlayerId: "p_matt", playerIds: ids, games: [] });
+    const round = state.rounds.find((x) => x.id === roundId)!;
+    const k = r as number;
+    for (const h of course.holes) {
+      // Matt: tracked shot by shot. Tee play rotates through safe / balanced / attack across the two visits;
+      // attacking holes cost a stroke now and then, which is the point of remembering.
+      const tee = KINDS[(h.holeNumber + k * 2) % 3];
+      const extra = (tee === "attack" && (h.holeNumber + k) % 2 === 0) || (h.holeNumber * 7 + k * 3) % 9 === 0 ? 1 : 0;
+      seedPlannedHole(state, round, "p_matt", h.holeNumber, tee, extra, 40 + h.holeNumber * 3 + k * 11);
+      const putts = (h.holeNumber + k) % 5 === 0 ? 1 : (h.holeNumber * 3 + k) % 7 === 0 ? 3 : 2;
+      if (putts === 3) logPutt(state, roundId, "p_matt", h.holeNumber, 7);
+      if (putts >= 2) logPutt(state, roundId, "p_matt", h.holeNumber, 3);
+      logPutt(state, roundId, "p_matt", h.holeNumber, null);
+      // Everyone else: a believable card for their handicap.
+      ids.slice(1).forEach((pid, pi) => {
+        const over = [1, 1, 2][pi] + ((h.holeNumber * (pi + 3) + k * 5) % 4 === 0 ? 1 : 0) - ((h.holeNumber + pi + k) % 6 === 0 ? 1 : 0);
+        const gross = Math.max(h.par - 1, h.par + over - (pi === 1 ? 1 : 0));
+        round.scores.push({ entry: { ...emptyHoleEntry(pid, h.holeNumber), grossScore: gross, putts: 2 }, version: 1, updatedBy: "p_matt" });
+      });
+    }
+    finishRound(state, roundId);
+  });
+  state.actorId = actor;
 }
 /** Players in the same playing group as `playerId` (everyone when the round has no groups). */
 export function groupMates(round: Round, playerId: string): string[] {

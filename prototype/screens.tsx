@@ -11,6 +11,7 @@ import { dist, hazardDistances } from "./holeGeometry";
 import { fetchRealCourse } from "./osmCourse";
 import { recommend, simulate, aimFor } from "./strategy";
 import { caddieAdvice } from "./caddie";
+import { holeMemory } from "./memory";
 import { fmtSg, holeStrokesGained, roundStrokesGained } from "./strokesGained";
 import { SG_CATEGORIES, STROKES_GAINED_VERSION } from "../src/domain/strategy/strokesGained";
 import type { Club } from "./shots";
@@ -664,6 +665,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           )}
         </div>
       )}
+      {me && <HoleMemoryCard snap={snap} playerId={me.playerId} holeNumber={holeNumber} par={hole.par} />}
       {canTrack && (
         <ShotLog
           shots={myShots}
@@ -683,7 +685,10 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, holeShapeFor(state, snap.round.courseId, holeNumber).green.c)}
           flag={holeShapeFor(state, snap.round.courseId, holeNumber).green.c}
           suggested={clubForRemaining(state, snap.round, me!.playerId, dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, pendingAim(state, roundId, me!.playerId, holeNumber) ?? holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
-          onMark={(club) => withUndo((s) => { markBall(s, roundId, s.actorId, holeNumber, club, strategyCurrent && strategyCurrent.club === club ? { club, aimOffset: strategyCurrent.aimOffset, expected: strategyCurrent.expected } : null); })}
+          onMark={(club) => withUndo((s) => {
+            const kind = strategyCurrent ? (strategyPlan?.plays.find((p) => p.sim.club === strategyCurrent.club && Math.abs(p.sim.aimOffset - strategyCurrent.aimOffset) < 5)?.kind ?? "own") : undefined;
+            markBall(s, roundId, s.actorId, holeNumber, club, strategyCurrent && strategyCurrent.club === club ? { club, aimOffset: strategyCurrent.aimOffset, expected: strategyCurrent.expected, kind } : null);
+          })}
           onClubChange={onClubChange}
           dispersion={dispersion}
           strategy={{ current: strategyCurrent, plan: strategyPlan, risk, onRisk: setRisk, advice, onPlay: (club: Club, aim) => { setSelectedClub(club); mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, aim)); } }}
@@ -850,6 +855,63 @@ function StatsTab({ snap }: { snap: Snapshot }) {
       <BagCard shots={snap.round.shots ?? []} playerId={state.actorId} playerName={snap.players.find((p) => p.playerId === state.actorId)?.displayName ?? ""} bag={state.players.find((p) => p.id === state.actorId)?.bag ?? {}} handicapIndex={state.players.find((p) => p.id === state.actorId)?.handicapIndex ?? 15} onProfile={(club, profile) => mutate((s) => setClubProfile(s, s.actorId, club, profile))} />
       <p className="text-xs text-muted text-center">Percentages only count holes where that stat was entered. Nothing is inferred from the score.</p>
     </Page>
+  );
+}
+
+const KIND_WORDS = { safe: "Safe", balanced: "Balanced", attack: "Attack", own: "Own call" } as const;
+const SCORE_WORDS = (toPar: number) => (toPar <= -2 ? "eagle" : toPar === -1 ? "birdie" : toPar === 0 ? "par" : toPar === 1 ? "bogey" : toPar === 2 ? "double" : `+${toPar}`);
+const clubName = (c: Shot["club"]) => (c === "Dr" ? "Driver" : c === "Hy" ? "Hybrid" : c === "chip" ? "Chip" : c === "putt" ? "Putt" : c);
+const aimShort = (off: number | null) => (off === null ? "" : Math.abs(off) < 5 ? "middle" : `${Math.abs(off)} ${off > 0 ? "R" : "L"}`);
+const resultWord = (l: Shot["lie"]) => (l === "green" ? "green" : l === "fairway" ? "fairway" : l === "sand" ? "bunker" : l === "fringe" ? "fringe" : l === "rough" ? "rough" : "—");
+const monthYear = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : "");
+/** "Last time here": earlier rounds on this hole, the plays chosen, and how each tee strategy scored. */
+function HoleMemoryCard({ snap, playerId, holeNumber, par }: { snap: Snapshot; playerId: string; holeNumber: number; par: number }) {
+  const { state } = useApp();
+  const [open, setOpen] = useState(false);
+  const mem = holeMemory(state, snap.round.courseId, playerId, holeNumber, snap.round.id);
+  if (!mem) return null;
+  const toParText = (x: number) => (Math.abs(x) < 0.05 ? "E" : `${x > 0 ? "+" : "−"}${Math.abs(x).toFixed(Number.isInteger(x) ? 0 : 1)}`);
+  const bestTee = [...mem.byTeeStrategy].sort((a, b) => a.avgToPar - b.avgToPar)[0];
+  return (
+    <div className="card px-3 py-2" data-testid="hole-memory">
+      <button type="button" className="w-full flex items-center justify-between gap-2 text-left" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className="min-w-0">
+          <span className="label !mb-0">Last time here</span>
+          <span className="block text-[12px] text-ink-2" data-testid="memory-summary">
+            {mem.visits.length === 1 ? "1 visit" : `${mem.visits.length} visits`} · avg {mem.average.toFixed(1)} · best {mem.best} ({SCORE_WORDS(mem.best - par)})
+            {bestTee && mem.byTeeStrategy.length > 1 && mem.byTeeStrategy.some((b) => b.avgToPar !== bestTee.avgToPar) ? <> · <b className="text-ink">{KIND_WORDS[bestTee.kind]}</b> off the tee scored best</> : ""}
+          </span>
+        </span>
+        <span className="text-[11px] text-accent font-semibold shrink-0">{open ? "hide" : "show"}</span>
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-2">
+          <ul className="flex flex-col gap-1.5">
+            {mem.visits.map((v) => (
+              <li key={v.roundId} className="rounded-lg bg-surface-2/60 px-2.5 py-2 text-[12px]" data-testid="memory-visit">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-semibold">{v.tripName.replace(/^Pinehurst /, "")} · {v.roundName}<span className="text-muted font-normal"> · {monthYear(v.date)}</span></span>
+                  <span className="whitespace-nowrap"><b className="font-display text-base">{v.gross}</b> <span className="text-muted">{SCORE_WORDS(v.toPar)}{v.putts !== null ? ` · ${v.putts} putt${v.putts === 1 ? "" : "s"}` : ""}</span></span>
+                </div>
+                {v.tee && (
+                  <p className="text-ink-2 mt-0.5">
+                    Tee: <b>{clubName(v.tee.club)}</b>{v.tee.kind && <span className="ml-1 rounded px-1 py-[1px] text-[10px] font-bold uppercase tracking-wide bg-brass-soft text-ink">{KIND_WORDS[v.tee.kind]}</span>}{v.tee.aimOffset !== null ? ` aim ${aimShort(v.tee.aimOffset)}` : ""} → {resultWord(v.tee.result)}{par > 3 ? ` (${Math.round(v.tee.distance)})` : ""}
+                    {v.approach && <> · Into the green: <b>{clubName(v.approach.club)}</b>{v.approach.kind ? ` ${KIND_WORDS[v.approach.kind].toLowerCase()}` : ""} → {resultWord(v.approach.result)}</>}
+                  </p>
+                )}
+                {v.sg && <p className="text-muted mt-0.5">Strokes gained {fmtSg(v.sg.total)}{SG_CATEGORIES.filter((c) => v.sg!.shotsByCategory[c.key] > 0).map((c) => ` · ${c.key === "tee" ? "tee" : c.key === "approach" ? "approach" : c.key === "around" ? "short game" : "putting"} ${fmtSg(v.sg!.byCategory[c.key])}`).join("")}</p>}
+              </li>
+            ))}
+          </ul>
+          {mem.byTeeStrategy.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 text-[11px]" data-testid="memory-strategies">
+              <span className="text-muted">Off the tee here:</span>
+              {mem.byTeeStrategy.map((b) => <span key={b.kind} className={`rounded-md px-2 py-0.5 font-semibold ${b === bestTee && mem.byTeeStrategy.length > 1 ? "bg-brass-soft text-ink" : "bg-surface-2 text-ink-2"}`}>{KIND_WORDS[b.kind]} {toParText(b.avgToPar)}<span className="font-normal text-muted"> · {b.visits}×</span></span>)}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -28,7 +28,7 @@ export interface Shot {
   /** A putt that dropped: the hole is complete at this shot. */
   holed?: boolean;
   /** The play chosen before the shot: its club, aim offset and the strokes it promised from here (1 + average leave). */
-  plan?: { club: Club | "chip" | "putt"; aimOffset: number; expected: number } | null;
+  plan?: { club: Club | "chip" | "putt"; aimOffset: number; expected: number; /** Which of the strategy card's plays it was, or the player's own call. */ kind?: "safe" | "balanced" | "attack" | "own" } | null;
 }
 export const isPutt = (s: Shot) => s.club === "putt";
 
