@@ -4,7 +4,7 @@ import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots,
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { RoundReplay, replayableHoles } from "./Replay";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, sgBaseline, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, setTrackingOn, sgBaseline, trackingOn, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist, hazardDistances } from "./holeGeometry";
@@ -554,7 +554,9 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const go = (h: number) => nav({ name: "round", roundId, tab: "score", hole: h });
   const actorRole = tripRole(state, snap.round.tripId, state.actorId);
   const [error, setError] = useState<string | null>(null);
-  const [tracking, setTracking] = useState(false);
+  // Tracking stays on for the round (per player) once switched on, so each new hole is ready to mark.
+  const tracking = trackingOn(state, roundId, state.actorId);
+  const setTracking = (on: boolean | ((t: boolean) => boolean)) => mutate((s) => setTrackingOn(s, roundId, s.actorId, typeof on === "function" ? on(trackingOn(s, roundId, s.actorId)) : on));
   const [aimMode, setAimMode] = useState(false);
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
   const [selectedClub, setSelectedClub] = useState<Shot["club"] | null>(null);
