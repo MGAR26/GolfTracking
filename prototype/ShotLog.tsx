@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { fmtSg, type SgBaseline } from "./strokesGained";
+import type { CaddieAdvice } from "./caddie";
 import type { SgShot, SgTotals } from "../src/domain/strategy/strokesGained";
 import { Card } from "./ui";
 import { CLUBS, missFromAim, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
@@ -16,7 +17,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
   /** Yards from the ball to the pin, and the club that fits it. */
   remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void; onClubChange?: (club: Shot["club"]) => void; dispersion?: DispersionModel | null;
   /** Odds for the selected club at the current aim, the ranked plays, and the risk slider. */
-  strategy?: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void; planned?: { shots: number; delta: number } | null } | null;
+  strategy?: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void; planned?: { shots: number; delta: number } | null; advice?: CaddieAdvice | null } | null;
   onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onHoleOut: (putts: number) => void;
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
   /** Strokes gained per shot on this hole, and the hole's totals, against the chosen baseline. */
@@ -73,7 +74,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
                 </p>
               )}
               {strategy && (strategy.current || strategy.plan) && (
-                <StrategyCard current={strategy.current} plan={strategy.plan} risk={strategy.risk} onRisk={strategy.onRisk} planned={strategy.planned ?? sg?.totals.planned ?? null} onPlay={(c, a) => { setPick({ forShot: shots.length, club: c }); strategy.onPlay(c, a); }} />
+                <StrategyCard current={strategy.current} plan={strategy.plan} risk={strategy.risk} onRisk={strategy.onRisk} planned={strategy.planned ?? sg?.totals.planned ?? null} advice={strategy.advice ?? null} onPlay={(c, a) => { setPick({ forShot: shots.length, club: c }); strategy.onPlay(c, a); }} />
               )}
               <p className="text-[11px] text-muted">
                 On the course GPS marks the spot when you press it. In this demo it drops the ball down the line for the club;{" "}
@@ -193,7 +194,7 @@ function SgChip({ value, title }: { value: number; title: string }) {
 const CATEGORY_WORDS = { tee: "off the tee", approach: "approach", around: "around the green", putting: "putting" } as const;
 const sgTitle = (s: SgShot) => `${CATEGORY_WORDS[s.category]}: ${s.before.toFixed(2)} expected from here, ${s.after.toFixed(2)} after`;
 
-export function StrategyCard({ current, plan, risk, onRisk, onPlay, planned = null }: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void; /** Plan-vs-actual so far on this hole. */ planned?: { shots: number; delta: number } | null }) {
+export function StrategyCard({ current, plan, risk, onRisk, onPlay, planned = null, advice = null }: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void; /** Plan-vs-actual so far on this hole. */ planned?: { shots: number; delta: number } | null; /** Plain-language read of the plays. */ advice?: CaddieAdvice | null }) {
   const [open, setOpen] = useState(true);
   const picked = plan?.recommended;
   return (
@@ -202,6 +203,12 @@ export function StrategyCard({ current, plan, risk, onRisk, onPlay, planned = nu
         <span className="label !mb-0">Odds &amp; plays</span>
         <span className="text-[11px] text-muted">{open ? "hide" : "show"}</span>
       </button>
+      {advice && (
+        <div className="rounded-md bg-ink text-[var(--bg)] px-2.5 py-2 text-[12px] leading-snug" data-testid="caddie">
+          <p className="font-semibold">{advice.headline}</p>
+          {advice.lines.map((l, i) => <p key={i} className="opacity-90 mt-0.5">{l}</p>)}
+        </div>
+      )}
       {open && current && (
         <div data-testid="outcome">
           <div className="flex items-baseline justify-between text-[11px] mb-1"><span className="font-semibold">{clubLabel(current.club)} · {describeAim(current.aimOffset)}</span><span className="text-muted">expected {current.expected.toFixed(1)} strokes from here</span></div>

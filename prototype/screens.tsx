@@ -7,9 +7,10 @@ import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
 import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, sgBaseline, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
-import { dist } from "./holeGeometry";
+import { dist, hazardDistances } from "./holeGeometry";
 import { fetchRealCourse } from "./osmCourse";
 import { recommend, simulate, aimFor } from "./strategy";
+import { caddieAdvice } from "./caddie";
 import { fmtSg, holeStrokesGained, roundStrokesGained } from "./strokesGained";
 import { SG_CATEGORIES, STROKES_GAINED_VERSION } from "../src/domain/strategy/strokesGained";
 import type { Club } from "./shots";
@@ -598,6 +599,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
     return simulate(dispersion, ballNow, aim, shapeNow.green.c, shapeNow, me.handicapIndex, 500, Math.round(off));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.playerId, dispersion, aimNow?.u, aimNow?.v, ballNow.u, ballNow.v, holeNumber, snap.round.courseId]);
+  const advice = strategyPlan ? caddieAdvice({ plan: strategyPlan, current: strategyCurrent, hazards: hazardDistances(ballNow, shapeNow.green.c, shapeNow), from: ballNow, remaining: dist(ballNow, shapeNow.green.c) }) : null;
   // Whose trails to overlay: just me by default; group, everyone, or a hand-picked set.
   const filter = state.shotFilter ?? { mode: "me" as const, playerIds: [] };
   const palette = snap.players.map((p, i) => ({ playerId: p.playerId, name: p.displayName, color: TRAIL_COLORS[i % TRAIL_COLORS.length] }));
@@ -684,7 +686,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           onMark={(club) => withUndo((s) => { markBall(s, roundId, s.actorId, holeNumber, club, strategyCurrent && strategyCurrent.club === club ? { club, aimOffset: strategyCurrent.aimOffset, expected: strategyCurrent.expected } : null); })}
           onClubChange={onClubChange}
           dispersion={dispersion}
-          strategy={{ current: strategyCurrent, plan: strategyPlan, risk, onRisk: setRisk, onPlay: (club: Club, aim) => { setSelectedClub(club); mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, aim)); } }}
+          strategy={{ current: strategyCurrent, plan: strategyPlan, risk, onRisk: setRisk, advice, onPlay: (club: Club, aim) => { setSelectedClub(club); mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, aim)); } }}
           onPutt={(leaveFt) => withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, leaveFt); })}
           onUpdate={(id, patch) => withUndo((s) => updateShot(s, roundId, id, patch))}
           onUndo={doUndo}
