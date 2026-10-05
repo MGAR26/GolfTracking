@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { buildHole, bunkerOutlines, compassName, DEFAULT_CONDITIONS, dist, elevationAt, ellipsePath, fairwayOutlines, greenDistances, greenOutline, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, waterOutlines, type Conditions, type ElevationSample, type Ellipse, type HolePhoto, type HoleShape, type Pt, type Wind } from "./holeGeometry";
 import { missFromAim, type Shot } from "./shots";
 import { dispersionOutline, expectedLanding, type DispersionModel } from "./bag";
+import { applyFlight, type FlightEnv } from "./flight";
 
 /**
  * Hole card: a perspective rendering from behind wherever you are, looking at the flag,
@@ -229,9 +230,9 @@ export const TRAIL_COLORS = ["#e4572e", "#3a86ff", "#ffd166", "#c77dff", "#00b4d
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange, satellite = true, onSatelliteChange }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange, satellite = true, onSatelliteChange, flight = null }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void; /** Draw the baked satellite photo under the shapes (when the course has one). */ satellite?: boolean; onSatelliteChange?: (on: boolean) => void;
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void; /** Draw the baked satellite photo under the shapes (when the course has one). */ satellite?: boolean; onSatelliteChange?: (on: boolean) => void; /** Wind and ground for drawing where shots really land. */ flight?: FlightEnv | null;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
@@ -479,14 +480,17 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {/* personal dispersion for the selected club: 80% zone, 50% core, expected finish */}
           {dispersion && tracking && (() => {
             const target = aim ?? flag;
-            const outer = polyPath(view, dispersionOutline(dispersion, pos, target, 0.8));
-            const inner = polyPath(view, dispersionOutline(dispersion, pos, target, 0.5));
-            const e = view.project(expectedLanding(dispersion, pos, target));
+            // where the club's misses land in today's wind and on this ground, not in still air
+            const fly = (p: Pt) => (flight ? applyFlight(flight, pos, target, p) : p);
+            const outer = polyPath(view, dispersionOutline(dispersion, pos, target, 0.8).map(fly));
+            const inner = polyPath(view, dispersionOutline(dispersion, pos, target, 0.5).map(fly));
+            const landing = fly(expectedLanding(dispersion, pos, target));
+            const e = view.project(landing);
             return (
               <g data-testid="dispersion" opacity={0.9}>
                 <path d={outer} fill="#b08d3c" fillOpacity={0.22} stroke="#f7f3ea" strokeWidth={1.2} strokeDasharray="3 2" />
                 <path d={inner} fill="#b08d3c" fillOpacity={0.22} stroke="#f7f3ea" strokeWidth={0.8} />
-                {ahead(expectedLanding(dispersion, pos, target)) && <circle cx={e.x} cy={e.y} r={2.2} fill="#f7f3ea" stroke="#b08d3c" strokeWidth={1} />}
+                {ahead(landing) && <circle cx={e.x} cy={e.y} r={2.2} fill="#f7f3ea" stroke="#b08d3c" strokeWidth={1} />}
               </g>
             );
           })()}

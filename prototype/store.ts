@@ -13,7 +13,8 @@ import { computeNetBalances, computePairwiseObligations, type LedgerEntry } from
 import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
-import { buildHole, buildRealHole, dist, lieAt, type Conditions, type HoleShape, type Pt } from "./holeGeometry";
+import { buildHole, buildRealHole, dist, holeConditions, lieAt, type Conditions, type HoleShape, type Pt } from "./holeGeometry";
+import { applyFlight, flightEnv, type FlightEnv } from "./flight";
 import type { SgBaseline } from "./strokesGained";
 import { expectedStrokes } from "../src/domain/strategy/expectedStrokes";
 import type { RealCourse } from "./osmCourse";
@@ -573,6 +574,13 @@ export function holeShapeFor(state: State, courseId: string, holeNumber: number)
   const real = state.courseGeometry?.[courseId]?.holes[holeNumber];
   return real ? buildRealHole(real, h.par) : buildHole(h.holeNumber, h.par, h.yardage);
 }
+/** The day's wind (as set on the hole view) and the hole's measured ground, ready for the flight model. */
+export const DEFAULT_WIND = { mph: 12, fromDeg: 225 };
+export function holeFlightEnv(state: State, courseId: string, holeNumber: number): FlightEnv {
+  const shape = holeShapeFor(state, courseId, holeNumber);
+  const bearing = shape.bearingDeg ?? holeConditions(holeNumber, shape.par).bearingDeg;
+  return flightEnv(state.wind ?? DEFAULT_WIND, bearing, shape);
+}
 export function setCourseGeometry(state: State, courseId: string, course: RealCourse | null) {
   state.courseGeometry ??= {};
   if (course) state.courseGeometry[courseId] = course; else delete state.courseGeometry[courseId];
@@ -600,7 +608,7 @@ export function markBall(state: State, roundId: string, playerId: string, holeNu
   } else {
     // Demo stand-in for GPS: one draw from the player's own dispersion model for that club.
     const player = state.players.find((p) => p.id === playerId)!;
-    to = sampleShot(dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId), from, target, seed);
+    to = applyFlight(holeFlightEnv(state, round.courseId, holeNumber), from, target, sampleShot(dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId), from, target, seed));
   }
   return logShot(state, roundId, playerId, holeNumber, to, { club, plan });
 }

@@ -4,6 +4,7 @@
  * the real app can hand the same facts to a language model later for tone, never for numbers.
  */
 import { dist, type HazardDistance, type Pt } from "./holeGeometry";
+import { DRIFT_PER_MPH_PER_YD, windFor, type FlightEnv } from "./flight";
 import type { Club } from "./shots";
 import type { Simulation, Strategy } from "./strategy";
 
@@ -42,7 +43,27 @@ export function historyLine(history: TeeHistory[]): string | null {
   return `Here before: ${parts.join(", ")}.`;
 }
 
-export function caddieAdvice({ plan, current, hazards, from, remaining, history = [] }: { plan: Strategy; current: Simulation | null; hazards: HazardDistance[]; from: Pt; remaining: number; /** Earlier visits, shown on the tee shot only. */ history?: TeeHistory[] }): CaddieAdvice {
+/** The wind sentence: how far it moves this shot and how the aim deals with it, plus a head/tail note. */
+export function windLine(env: FlightEnv, from: Pt, rec: Simulation): string | null {
+  const { head, cross } = windFor(env, from, rec.aim);
+  const flight = dist(from, rec.aim);
+  const parts: string[] = [];
+  if (Math.abs(cross) >= 3) {
+    const drift = Math.round(Math.abs(cross) * DRIFT_PER_MPH_PER_YD * flight);
+    const dir = cross > 0 ? "left to right" : "right to left";
+    const into = rec.aimOffset * cross < 0 && Math.abs(rec.aimOffset) >= 3;
+    parts.push(`${Math.round(Math.abs(cross))} mph ${dir} moves it about ${drift} yard${drift === 1 ? "" : "s"}${into ? `, so the aim is ${Math.abs(rec.aimOffset)} ${rec.aimOffset > 0 ? "right" : "left"} and the wind brings it back` : ""}`);
+  }
+  if (Math.abs(head) >= 4) {
+    const yds = Math.round(head > 0 ? flight * 0.01 * head : flight * 0.005 * -head);
+    parts.push(head > 0 ? `into ${Math.round(head)} mph costs about ${yds} yards` : `${Math.round(-head)} mph helping adds about ${yds}`);
+  }
+  if (!parts.length) return null;
+  const t = parts.join("; ");
+  return `${t.charAt(0).toUpperCase()}${t.slice(1)}.`;
+}
+
+export function caddieAdvice({ plan, current, hazards, from, remaining, history = [], env }: { plan: Strategy; current: Simulation | null; hazards: HazardDistance[]; from: Pt; remaining: number; /** Earlier visits, shown on the tee shot only. */ history?: TeeHistory[]; /** Wind and ground: the wind line explains the aim. */ env?: FlightEnv }): CaddieAdvice {
   const rec = plan.recommended;
   const reaches = rec.odds.green >= 0.15 || shotLength(rec, from) >= remaining - 15;
   const headline = reaches
@@ -108,5 +129,8 @@ export function caddieAdvice({ plan, current, hazards, from, remaining, history 
   // Course memory goes right after the hazard line, on the tee shot, when there is history.
   const remembered = historyLine(history);
   if (remembered) lines.splice(Math.min(1, lines.length), 0, remembered);
-  return { headline, lines: lines.slice(0, remembered ? 4 : 3) };
+  // The wind comes first: it is why the aim is where it is.
+  const w = env ? windLine(env, from, rec) : null;
+  if (w) lines.unshift(w);
+  return { headline, lines: lines.slice(0, 4) };
 }

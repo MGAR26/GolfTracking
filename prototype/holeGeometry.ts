@@ -380,7 +380,7 @@ export function playsLike(from: Pt, flag: Pt, holeLength: number, cond: HoleCond
   const diff = ((shotBearingDeg - windToDeg + 540) % 360) - 180; // 0 = wind blowing with the shot
   const along = Math.cos((diff * Math.PI) / 180) * wind.mph; // + tailwind, - headwind
   const headwindMph = -along;
-  const crosswindMph = Math.sin((diff * Math.PI) / 180) * wind.mph; // + blows to the right of the shot
+  const crosswindMph = -Math.sin((diff * Math.PI) / 180) * wind.mph; // + blows to the right of the shot (diff < 0: wind heading clockwise of the shot)
   const windAdj = headwindMph > 0 ? distance * 0.01 * headwindMph : distance * 0.005 * headwindMph;
   // Warm air and altitude both make the ball fly farther (about 1.2% per 10°F, 2% per 1,000 ft), so the shot plays shorter.
   const tempAdj = -distance * 0.0012 * (conditions.tempF - 70);
