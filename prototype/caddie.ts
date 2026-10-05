@@ -29,7 +29,20 @@ function worstMiss(s: Simulation): string | null {
 /** Yards the play sends the ball: the aim point sits at the club's carry. */
 const shotLength = (s: Simulation, from: Pt) => dist(from, s.aim);
 
-export function caddieAdvice({ plan, current, hazards, from, remaining }: { plan: Strategy; current: Simulation | null; hazards: HazardDistance[]; from: Pt; remaining: number }): CaddieAdvice {
+/** One earlier visit to this hole: the tee club, the play it was, and the score (newest first). */
+export interface TeeHistory { club: Club | "chip" | "putt"; kind: "safe" | "balanced" | "attack" | "own" | null; gross: number; par: number }
+const SCORE = (d: number) => (d <= -2 ? "eagle" : d === -1 ? "birdie" : d === 0 ? "par" : d === 1 ? "bogey" : d === 2 ? "double" : `+${d}`);
+const historyClub = (c: TeeHistory["club"]) => (c === "chip" ? "a chip" : c === "putt" ? "a putt" : lower(c));
+/** "Here before: driver (attack) made 4, 3-wood (balanced) made 5." — up to three visits, newest first. */
+export function historyLine(history: TeeHistory[]): string | null {
+  if (!history.length) return null;
+  const parts = history.slice(0, 3).map((h) => `${historyClub(h.club)}${h.kind && h.kind !== "own" ? ` (${h.kind})` : ""} made ${h.gross} (${SCORE(h.gross - h.par)})`);
+  const clubs = new Set(history.slice(0, 3).map((h) => h.club));
+  if (clubs.size === 1 && history.length > 1) return `Your last ${Math.min(3, history.length)} here off the tee were all ${historyClub(history[0].club)}: made ${history.slice(0, 3).map((h) => h.gross).join(", ")}.`;
+  return `Here before: ${parts.join(", ")}.`;
+}
+
+export function caddieAdvice({ plan, current, hazards, from, remaining, history = [] }: { plan: Strategy; current: Simulation | null; hazards: HazardDistance[]; from: Pt; remaining: number; /** Earlier visits, shown on the tee shot only. */ history?: TeeHistory[] }): CaddieAdvice {
   const rec = plan.recommended;
   const reaches = rec.odds.green >= 0.15 || shotLength(rec, from) >= remaining - 15;
   const headline = reaches
@@ -92,5 +105,8 @@ export function caddieAdvice({ plan, current, hazards, from, remaining }: { plan
       ? `${what} plays about the same${miss ? `; ${miss}` : ""}.`
       : `${what} ${d > 0 ? "costs" : "saves"} ${strokes(d)} against that${miss ? `; ${miss}` : ""}.`);
   }
-  return { headline, lines: lines.slice(0, 3) };
+  // Course memory goes right after the hazard line, on the tee shot, when there is history.
+  const remembered = historyLine(history);
+  if (remembered) lines.splice(Math.min(1, lines.length), 0, remembered);
+  return { headline, lines: lines.slice(0, remembered ? 4 : 3) };
 }

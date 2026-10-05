@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { caddieAdvice } from "../../prototype/caddie";
+import { caddieAdvice, historyLine } from "../../prototype/caddie";
 import type { Simulation, Strategy } from "../../prototype/strategy";
 import type { HazardDistance } from "../../prototype/holeGeometry";
 import type { Club } from "../../prototype/shots";
@@ -48,5 +48,15 @@ describe("caddie wording", () => {
     expect(a.lines).toHaveLength(2);
     const dry = caddieAdvice({ plan: plan({ ...rec, odds: { ...rec.odds, water: 0 } }, attack, rec), current: null, hazards: [lateral], from, remaining: 400 });
     expect(dry.lines[0]).toBe("Keeps the water right out of play.");
+  });
+  it("adds what happened here before on the tee, after the hazard line", () => {
+    const rec = sim("Hy", 205, -10, 4.05, { sand: 0.04 }, 165);
+    const attack = sim("Dr", 245, 0, 3.98, { sand: 0.22 }, 125);
+    const history = [{ club: "Dr" as const, kind: "attack" as const, gross: 5, par: 4 }, { club: "Hy" as const, kind: "safe" as const, gross: 4, par: 4 }];
+    const a = caddieAdvice({ plan: plan(rec, attack, rec), current: null, hazards: [bunkerR], from, remaining: 370, history });
+    expect(a.lines[0]).toMatch(/^Watch the bunker right/);
+    expect(a.lines[1]).toBe("Here before: driver (attack) made 5 (bogey), hybrid (safe) made 4 (par).");
+    expect(historyLine([{ club: "Dr", kind: "attack", gross: 4, par: 4 }, { club: "Dr", kind: "balanced", gross: 5, par: 4 }])).toBe("Your last 2 here off the tee were all driver: made 4, 5.");
+    expect(historyLine([])).toBeNull();
   });
 });
