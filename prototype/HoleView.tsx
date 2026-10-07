@@ -476,15 +476,15 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             );
           })}
           {/* lay-up spots for "your numbers" */}
-          {layups.map((l, i) => { const q = view.project(l.point); const left = i % 2 === 1; return <g key={l.n}><circle cx={q.x} cy={q.y} r={4} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1.2} /><text x={left ? q.x - 6 : q.x + 6} y={q.y + 3} textAnchor={left ? "end" : "start"} {...label}>{l.n} in</text></g>; })}
+          {layups.map((l, i) => { const q = view.project(l.point); const left = i % 2 === 1; const underAim = !!aimPt && Math.hypot(aimPt.x - q.x, aimPt.y - q.y) < 16; return <g key={l.n}><circle cx={q.x} cy={q.y} r={4} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1.2} />{!underAim && <text x={left ? q.x - 6 : q.x + 6} y={q.y + 3} textAnchor={left ? "end" : "start"} {...label}>{l.n} in</text>}</g>; })}
           {/* personal dispersion for the selected club: 80% zone, 50% core, expected finish */}
           {dispersion && tracking && (() => {
             const target = aim ?? flag;
             // where the club's misses land in today's wind and on this ground, not in still air
             const fly = (p: Pt) => (flight ? applyFlight(flight, pos, target, p) : p);
-            const outer = polyPath(view, dispersionOutline(dispersion, pos, target, 0.8).map(fly));
-            const inner = polyPath(view, dispersionOutline(dispersion, pos, target, 0.5).map(fly));
-            const landing = fly(expectedLanding(dispersion, pos, target));
+            const outer = polyPath(view, dispersionOutline(dispersion, pos, target, 0.8, 40, !!aim).map(fly));
+            const inner = polyPath(view, dispersionOutline(dispersion, pos, target, 0.5, 40, !!aim).map(fly));
+            const landing = fly(expectedLanding(dispersion, pos, target, !!aim));
             const e = view.project(landing);
             return (
               <g data-testid="dispersion" opacity={0.9}>

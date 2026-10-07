@@ -601,7 +601,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
     const aim = aimNow ?? aimFor(ballNow, shapeNow.green.c, dispersion.carry, 0);
     const len = Math.hypot(shapeNow.green.c.u - ballNow.u, shapeNow.green.c.v - ballNow.v) || 1;
     const off = ((aim.u - ballNow.u) * -(shapeNow.green.c.v - ballNow.v) + (aim.v - ballNow.v) * (shapeNow.green.c.u - ballNow.u)) / len;
-    return simulate(dispersion, ballNow, aim, shapeNow.green.c, shapeNow, me.handicapIndex, 500, Math.round(off), env);
+    return simulate(dispersion, ballNow, aim, shapeNow.green.c, shapeNow, me.handicapIndex, 500, Math.round(off), env, !!aimNow);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [env.windU, env.windV, me?.playerId, dispersion, aimNow?.u, aimNow?.v, ballNow.u, ballNow.v, holeNumber, snap.round.courseId]);
   const teeHistory = me && myShots.length === 0 ? (holeMemory(state, snap.round.courseId, me.playerId, holeNumber, snap.round.id)?.visits ?? []).filter((v) => v.tee).map((v) => ({ club: v.tee!.club, kind: v.tee!.kind, gross: v.gross, par: hole.par })) : [];

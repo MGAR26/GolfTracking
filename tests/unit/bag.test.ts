@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultProfile, dispersionModel, dispersionOutline, ellipseScale, expectedLanding, sampleShot } from "../../prototype/bag";
+import { defaultProfile, dispersionModel, dispersionOutline, ellipseScale, expectedLanding, sampleShot, reachAlong, TRUSTED_DISTANCE_SHOTS } from "../../prototype/bag";
 import type { Shot } from "../../prototype/shots";
 
 const aimed = (n: number, lateral: number, long: number): Shot[] =>
@@ -44,5 +44,23 @@ describe("my bag dispersion", () => {
   it("default profile is sensible per handicap", () => {
     expect(defaultProfile("Dr", 2).width).toBe("narrow");
     expect(defaultProfile("Dr", 25).width).toBe("wide");
+  });
+});
+
+describe("landing zone follows the aim until the club is learned", () => {
+  const from = { u: 0, v: 0 }, far = { u: 320, v: 0 };
+  it("centres on an explicit aim with few shots, on the club's distance without an aim", () => {
+    const m = dispersionModel("Dr", {}, 5, [], "p");
+    expect(reachAlong(m, 320, true)).toBe(320);
+    expect(reachAlong(m, 320, false)).toBeCloseTo(m.carry);
+    expect(expectedLanding(m, from, far, true).u).toBeCloseTo(320);
+    expect(expectedLanding(m, from, far).u).toBeCloseTo(m.carry);
+  });
+  it("caps at the measured distance once there are enough aimed shots", () => {
+    const shots = Array.from({ length: TRUSTED_DISTANCE_SHOTS }, (_, i) => ({ id: `s${i}`, playerId: "p", holeNumber: 1, seq: 1, club: "Dr" as const, from, to: { u: 262, v: 0 }, distance: 262, shape: null, trajectory: null, lie: "fairway" as const, aim: { u: 262, v: 0 } }));
+    const m = dispersionModel("Dr", {}, 5, shots, "p");
+    expect(m.samples).toBe(TRUSTED_DISTANCE_SHOTS);
+    expect(reachAlong(m, 320, true)).toBeCloseTo(m.carry);
+    expect(m.carry).toBeGreaterThan(255);
   });
 });

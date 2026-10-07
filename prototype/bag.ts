@@ -71,15 +71,27 @@ export function dispersionModel(club: Club, bag: Bag, handicapIndex: number, sho
   };
 }
 
+/** Aimed shots with a club before its measured distance is trusted over where the player aims. */
+export const TRUSTED_DISTANCE_SHOTS = 15;
+/**
+ * How far along the aim line the shot is centred. Until the app has enough of the player's own
+ * aimed shots with this club, an explicit aim point is taken at its word (the player knows their
+ * game better than a default table); once it knows them, the club's measured distance caps it.
+ * With no aim point (aiming at the flag) the club's normal distance always applies.
+ */
+export function reachAlong(model: DispersionModel, aimDistance: number, followAim: boolean): number {
+  return followAim && model.samples < TRUSTED_DISTANCE_SHOTS ? aimDistance : Math.min(aimDistance, model.carry);
+}
+
 /** Radius multiplier so the ellipse holds `p` of shots (2-D normal). */
 export const ellipseScale = (p: number) => Math.sqrt(-2 * Math.log(1 - p));
 
 /** Ellipse outline in hole coordinates for a shot from `from` aimed at `target` (the model is in aim-line coordinates). */
-export function dispersionOutline(model: DispersionModel, from: Pt, target: Pt, p = 0.8, steps = 40): Pt[] {
+export function dispersionOutline(model: DispersionModel, from: Pt, target: Pt, p = 0.8, steps = 40, followAim = false): Pt[] {
   const len = Math.hypot(target.u - from.u, target.v - from.v) || 1;
   const f = { u: (target.u - from.u) / len, v: (target.v - from.v) / len }, r = { u: -f.v, v: f.u };
   const k = ellipseScale(p);
-  const cLong = Math.min(len, model.carry) + model.center.long, cLat = model.center.lateral;
+  const cLong = reachAlong(model, len, followAim) + model.center.long, cLat = model.center.lateral;
   const out: Pt[] = [];
   for (let i = 0; i < steps; i++) {
     const t = (i / steps) * Math.PI * 2;
@@ -90,20 +102,20 @@ export function dispersionOutline(model: DispersionModel, from: Pt, target: Pt, 
 }
 
 /** Where the model expects the ball to finish. */
-export function expectedLanding(model: DispersionModel, from: Pt, target: Pt): Pt {
+export function expectedLanding(model: DispersionModel, from: Pt, target: Pt, followAim = false): Pt {
   const len = Math.hypot(target.u - from.u, target.v - from.v) || 1;
   const f = { u: (target.u - from.u) / len, v: (target.v - from.v) / len }, r = { u: -f.v, v: f.u };
-  const a = Math.min(len, model.carry) + model.center.long, b = model.center.lateral;
+  const a = reachAlong(model, len, followAim) + model.center.long, b = model.center.lateral;
   return { u: from.u + f.u * a + r.u * b, v: from.v + f.v * a + r.v * b };
 }
 
 /** One sampled shot from the model (deterministic for a given seed). */
-export function sampleShot(model: DispersionModel, from: Pt, target: Pt, seed: number): Pt {
+export function sampleShot(model: DispersionModel, from: Pt, target: Pt, seed: number, followAim = false): Pt {
   const rnd = (k: number) => { const x = Math.sin(seed * 12.9898 + k * 78.233) * 43758.5453; return x - Math.floor(x); };
   const gauss = (k: number) => Math.sqrt(-2 * Math.log(Math.max(1e-9, rnd(k)))) * Math.cos(2 * Math.PI * rnd(k + 1));
   const len = Math.hypot(target.u - from.u, target.v - from.v) || 1;
   const f = { u: (target.u - from.u) / len, v: (target.v - from.v) / len }, r = { u: -f.v, v: f.u };
-  const a = Math.min(len, model.carry) + model.center.long + gauss(1) * model.sdLong;
+  const a = reachAlong(model, len, followAim) + model.center.long + gauss(1) * model.sdLong;
   const b = model.center.lateral + gauss(3) * model.sdLateral;
   return { u: from.u + f.u * a + r.u * b, v: from.v + f.v * a + r.v * b };
 }

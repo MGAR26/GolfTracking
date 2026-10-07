@@ -36,12 +36,12 @@ export function utility(s: Simulation, risk: number): number {
 }
 
 /** One club at one aim, `n` shots. */
-export function simulate(model: DispersionModel, from: Pt, aim: Pt, flag: Pt, hole: HoleShape, handicapIndex: number, n = 600, aimOffset = 0, env: FlightEnv = CALM): Simulation {
+export function simulate(model: DispersionModel, from: Pt, aim: Pt, flag: Pt, hole: HoleShape, handicapIndex: number, n = 600, aimOffset = 0, env: FlightEnv = CALM, followAim = false): Simulation {
   const counts: Record<Outcome, number> = { fairway: 0, rough: 0, sand: 0, water: 0, green: 0 };
   const next: number[] = [];
   let leaveSum = 0;
   for (let i = 0; i < n; i++) {
-    const to = applyFlight(env, from, aim, sampleShot(model, from, aim, i * 7919 + Math.round(aim.v * 13) + model.club.length));
+    const to = applyFlight(env, from, aim, sampleShot(model, from, aim, i * 7919 + Math.round(aim.v * 13) + model.club.length, followAim));
     const lie = lieAt(hole, to);
     const outcome: Outcome = lie === "tee" ? "fairway" : lie;
     counts[outcome]++;

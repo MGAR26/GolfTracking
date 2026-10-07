@@ -5,7 +5,7 @@ import type { SgShot, SgTotals } from "../src/domain/strategy/strokesGained";
 import { Card } from "./ui";
 import { CLUBS, missFromAim, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 import { dist, type Pt } from "./holeGeometry";
-import { defaultProfile, dispersionModel, type Bag, type ClubProfile, type DispersionModel, type MissBias, type MissWidth } from "./bag";
+import { defaultProfile, dispersionModel, type Bag, type ClubProfile, type DispersionModel, type MissBias, type MissWidth, TRUSTED_DISTANCE_SHOTS } from "./bag";
 import { describeAim, type Outcome, type Play, type Simulation, type Strategy } from "./strategy";
 
 const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "putt" ? "Putt" : c === "Dr" ? "Driver" : c);
@@ -71,6 +71,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
                 <p className="text-[11px] text-ink-2" data-testid="dispersion-line">
                   Your {clubLabel(club)}: carries {Math.round(dispersion.carry)}{Math.abs(dispersion.center.lateral) >= 2 ? `, tends ${Math.round(Math.abs(dispersion.center.lateral))} ${dispersion.center.lateral > 0 ? "right" : "left"}` : ", straight"}, 8 in 10 inside ±{Math.round(dispersion.sdLateral * 1.8)} yds
                   <span className="text-muted"> · {dispersion.samples ? `${dispersion.samples} aimed shot${dispersion.samples === 1 ? "" : "s"}` : "from your bag profile"}</span>
+                  {aim && dispersion.samples < TRUSTED_DISTANCE_SHOTS && <span className="block text-muted" data-testid="follows-aim">The circle goes where you aim until it has learned your {clubLabel(club)} ({TRUSTED_DISTANCE_SHOTS - dispersion.samples} more aimed shot{TRUSTED_DISTANCE_SHOTS - dispersion.samples === 1 ? "" : "s"}).</span>}
                 </p>
               )}
               {strategy && (strategy.current || strategy.plan) && (

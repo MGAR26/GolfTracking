@@ -597,7 +597,8 @@ export function markBall(state: State, roundId: string, playerId: string, holeNu
   const prior = holeShots(round, playerId, holeNumber);
   const from = prior.length ? prior[prior.length - 1].to : { u: 0, v: 0 };
   const flag = holeShape(state, round, holeNumber).green.c;
-  const target = state.pendingAims?.[aimKey(roundId, playerId, holeNumber)] ?? flag;
+  const aimed = state.pendingAims?.[aimKey(roundId, playerId, holeNumber)];
+  const target = aimed ?? flag;
   const remaining = dist(from, target);
   const seed = prior.length * 31 + holeNumber * 7 + playerId.length;
   let to: Pt;
@@ -608,7 +609,7 @@ export function markBall(state: State, roundId: string, playerId: string, holeNu
   } else {
     // Demo stand-in for GPS: one draw from the player's own dispersion model for that club.
     const player = state.players.find((p) => p.id === playerId)!;
-    to = applyFlight(holeFlightEnv(state, round.courseId, holeNumber), from, target, sampleShot(dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId), from, target, seed));
+    to = applyFlight(holeFlightEnv(state, round.courseId, holeNumber), from, target, sampleShot(dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId), from, target, seed, !!aimed));
   }
   return logShot(state, roundId, playerId, holeNumber, to, { club, plan });
 }
