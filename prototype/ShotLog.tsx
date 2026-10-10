@@ -69,7 +69,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
               </div>
               {dispersion && club !== "chip" && club !== "putt" && (
                 <p className="text-[11px] text-ink-2" data-testid="dispersion-line">
-                  Your {clubLabel(club)}: carries {Math.round(dispersion.carry)}{dispersion.roll >= 1 ? ` + ${Math.round(dispersion.roll)} roll` : ""}{Math.abs(dispersion.center.lateral) >= 2 ? `, tends ${Math.round(Math.abs(dispersion.center.lateral))} ${dispersion.center.lateral > 0 ? "right" : "left"}` : ", straight"}, 8 in 10 inside ±{Math.round(dispersion.sdLateral * 1.8)} yds
+                  Your {clubLabel(club)}: {Math.round(dispersion.carry + dispersion.roll)} total ({Math.round(dispersion.carry)} carry + {Math.round(dispersion.roll)} roll){Math.abs(dispersion.center.lateral) >= 2 ? `, tends ${Math.round(Math.abs(dispersion.center.lateral))} ${dispersion.center.lateral > 0 ? "right" : "left"}` : ", straight"}, 8 in 10 inside ±{Math.round(dispersion.sdLateral * 1.8)} yds
                   <span className="text-muted"> · {dispersion.samples ? `${dispersion.samples} aimed shot${dispersion.samples === 1 ? "" : "s"}` : "from your bag profile"}</span>
                   {aim && dispersion.samples < TRUSTED_DISTANCE_SHOTS && <span className="block text-muted" data-testid="follows-aim">The circle goes where you aim until it has learned your {clubLabel(club)} ({TRUSTED_DISTANCE_SHOTS - dispersion.samples} more aimed shot{TRUSTED_DISTANCE_SHOTS - dispersion.samples === 1 ? "" : "s"}).</span>}
                 </p>
@@ -294,8 +294,9 @@ export function BagCard({ shots, playerId, playerName, bag, handicapIndex, onPro
           return (
             <button key={c} type="button" onClick={() => setOpen(open === c ? null : c)} aria-pressed={open === c} className={`rounded-lg py-1.5 ${open === c ? "ring-2 ring-brass" : ""} ${m.distanceSource === "shots" || m.distanceSource === "entered+shots" || m.samples ? "bg-brass-soft" : setByYou ? "bg-surface-2" : "bg-surface-2/60"}`} data-testid={`bag-${c}`}>
               <p className="text-[10px] uppercase tracking-wide text-muted">{clubLabel(c)}</p>
-              <p className="font-display text-lg leading-tight">{Math.round(m.carry)}</p>
-              <p className="text-[9px] text-ink-2">{m.roll ? `+${Math.round(m.roll)} roll · ` : ""}{missWord(m)}</p>
+              <p className="font-display text-lg leading-tight" data-testid="bag-total">{Math.round(m.carry + m.roll)}</p>
+              <p className="text-[9.5px] leading-tight text-ink-2" data-testid="bag-split">{Math.round(m.carry)} carry<br />{Math.round(m.roll)} roll</p>
+              <p className="text-[9px] text-ink-2 mt-0.5">{missWord(m)}</p>
               <p className="text-[9px] text-muted" data-testid="bag-source">{m.distanceSource === "entered" ? "set by you" : m.distanceSource === "entered+shots" ? `you + ${m.fullShots} full` : m.distanceSource === "shots" ? `${m.fullShots} full swing${m.fullShots === 1 ? "" : "s"}` : "estimate"}</p>
             </button>
           );
@@ -331,7 +332,7 @@ export function BagCard({ shots, playerId, playerName, bag, handicapIndex, onPro
           </div>
         );
       })()}
-      <p className="mt-2 text-[11px] text-muted">Big number is carry; roll is added on top. Gold tiles use your tracked full swings; grey are your entries (used exactly as typed) or handicap-based estimates. These drive the club suggestion, the landing zone on the hole, and the plays.</p>
+      <p className="mt-2 text-[11px] text-muted">Big number is the total (carry + roll on fairway, normal turf). Gold tiles use your tracked full swings; grey are your entries (used exactly as typed) or handicap-based estimates. These drive the club suggestion, the landing zone on the hole, and the plays.</p>
     </Card>
   );
 }
