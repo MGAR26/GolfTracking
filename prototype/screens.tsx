@@ -3,8 +3,9 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { RoundReplay, replayableHoles } from "./Replay";
+import { SettleUpList, VenmoField } from "./SettleUp";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, holeFlightEnv, DEFAULT_WIND, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, setTrackingOn, sgBaseline, trackingOn, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, holeFlightEnv, DEFAULT_WIND, roundSettlement, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, setTrackingOn, sgBaseline, trackingOn, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist, hazardDistances } from "./holeGeometry";
@@ -197,7 +198,7 @@ export function TripScreen({ tripId }: { tripId: string }) {
         <Card title="Players">
           <ul className="grid grid-cols-2 gap-2 text-sm">
             {d.members.map((m) => (
-              <li key={m.id} className="flex items-center justify-between rounded-lg bg-surface-2/60 px-3 py-2"><span className="font-medium">{m.name}</span><span className="text-xs text-ink-2">HI {m.handicapIndex.toFixed(1)}</span></li>
+              <li key={m.id} className="grid grid-cols-2 items-center gap-y-0.5 rounded-lg bg-surface-2/60 px-3 py-2"><span className="font-medium">{m.name}</span><span className="text-xs text-ink-2 text-right">HI {m.handicapIndex.toFixed(1)}</span><VenmoField playerId={m.id} /></li>
             ))}
           </ul>
         </Card>
@@ -376,14 +377,8 @@ export function MoneyScreen({ tripId }: { tripId: string }) {
           </ul>
         </Card>
         <Card title="Settle up" action={<span className="text-xs text-muted">{d.settlement.payments.length} payment{d.settlement.payments.length === 1 ? "" : "s"}</span>}>
-          {d.settlement.payments.length === 0 ? <p className="text-sm text-muted">Everyone is even.</p> : (
-            <ul className="divide-y divide-line">
-              {d.settlement.payments.map((p, i) => (
-                <li key={i} className="flex items-center justify-between py-2 text-sm"><span><span className="font-medium">{name(p.fromPlayerId)}</span> pays <span className="font-medium">{name(p.toPlayerId)}</span></span><span className="font-semibold">{money(p.amountCents)}</span></li>
-              ))}
-            </ul>
-          )}
-          <p className="text-xs text-muted mt-2">Fewest payments that clear every balance. Itemized obligations below stay on record.</p>
+          <SettleUpList payments={d.settlement.payments} note={`${d.trip.name} settle-up`} />
+          <p className="text-xs text-muted mt-2">Fewest payments that clear every balance. Tap who gets paid to pay them on Venmo or copy their username. Itemized obligations below stay on record.</p>
         </Card>
         <Card title="Itemized ledger" action={<span className="text-xs text-muted">{active.length} entries</span>}>
           {active.length === 0 ? <p className="text-sm text-muted">Nothing posted yet. Lock a round or settle a side bet.</p> : (
@@ -447,6 +442,7 @@ function OverviewTab({ snap }: { snap: Snapshot }) {
   const hole = snap.currentHole ? snap.holes.find((h) => h.holeNumber === snap.currentHole)! : null;
   const canOrganize = !!me && me.tripRole === "OWNER";
   const roundLedger = state.ledger.filter((e) => e.roundId === roundId && e.status !== "REVERSED");
+  const roundPayments = roundSettlement(snap).payments;
   const highlights = snap.players.flatMap((p) => snap.totals[p.playerId].holes.filter((h) => h.grossToPar !== null && h.grossToPar <= -1).map((h) => ({ player: p.displayName, hole: h.holeNumber, label: h.grossToPar === -1 ? "Birdie" : h.grossToPar === -2 ? "Eagle" : "Albatross" })));
   return (
     <Page>
@@ -523,6 +519,12 @@ function OverviewTab({ snap }: { snap: Snapshot }) {
             return <li key={p.playerId} className="flex items-center justify-between rounded-lg bg-surface-2/60 px-3 py-2"><span className="font-medium">{p.displayName}</span><span className={`font-semibold ${v > 0 ? "text-ink" : v < 0 ? "text-neg" : "text-muted"}`}>{money(v, { sign: true })}</span></li>;
           })}
         </ul>
+        {roundPayments.length > 0 && (
+          <div className="mt-3 border-t border-line pt-2">
+            <p className="label !mb-1">{live ? "If it ended now" : "Who owes whom"}</p>
+            <SettleUpList payments={roundPayments} note={`${snap.course.name} · ${snap.round.name}`} />
+          </div>
+        )}
       </Card>
 
       {highlights.length > 0 && (
@@ -1078,6 +1080,12 @@ function FinishTab({ snap }: { snap: Snapshot }) {
       {settlements.length > 0 && (
         <Card title="Ledger entries to post">
           <ul className="divide-y divide-line text-sm">{settlements.map((st, i) => <li key={i} className="py-1.5 flex items-center justify-between"><span>{names[st.fromPlayerId]} → {names[st.toPlayerId]} <span className="text-muted">· {st.game}: {st.memo}</span></span><span className="font-semibold">{money(st.amountCents)}</span></li>)}</ul>
+        </Card>
+      )}
+      {roundSettlement(snap).payments.length > 0 && (
+        <Card title="Who owes whom" action={<span className="text-xs text-muted">games + side bets</span>}>
+          <SettleUpList payments={roundSettlement(snap).payments} note={`${snap.course.name} · ${snap.round.name}`} />
+          <p className="text-xs text-muted mt-2">Fewest payments for this round. Tap who gets paid to open Venmo with the amount filled in. The trip&apos;s Money page nets every round together.</p>
         </Card>
       )}
       {error && <p className="text-sm text-neg">{error}</p>}

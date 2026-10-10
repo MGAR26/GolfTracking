@@ -31,6 +31,9 @@ function load(): State {
     if (raw) {
       const saved = JSON.parse(raw) as State;
       // older saved demos predate last year's rounds; add them without touching anything else
+      // demo Venmo usernames for saved demos made before payments existed (John stays blank on purpose)
+      const demo: Record<string, string> = { p_matt: "GTO-Demo-Matt", p_marcus: "GTO-Demo-Marcus", p_ryan: "GTO-Demo-Ryan" };
+      if (!(saved as State & { demoVenmo?: boolean }).demoVenmo) { for (const p of saved.players) if (demo[p.id] && !p.venmo) p.venmo = demo[p.id]; (saved as State & { demoVenmo?: boolean }).demoVenmo = true; try { window.localStorage.setItem(STORAGE, JSON.stringify(saved)); } catch { /* convenience only */ } }
       if (!saved.trips.some((t) => t.id === PAST_TRIP_ID)) { addPastPinehurstRounds(saved); try { window.localStorage.setItem(STORAGE, JSON.stringify(saved)); } catch { /* convenience only */ } }
       return saved;
     }

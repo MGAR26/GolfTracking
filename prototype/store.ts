@@ -23,7 +23,7 @@ import pinehurst4Json from "./courses/pinehurst-4.json";
 const PINEHURST_4 = pinehurst4Json as unknown as RealCourse;
 import { isPutt, shotFrom, suggestClub, CLUBS, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 
-export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[]; /** Per-club carry and miss profile the player entered. */ bag?: Bag }
+export interface Player { id: string; name: string; handicapIndex: number; favoriteYardages?: number[]; /** Per-club carry and miss profile the player entered. */ bag?: Bag; /** Venmo username (no @), so whoever owes them can pay in one tap. */ venmo?: string }
 export interface Trip { id: string; name: string; destination: string | null; startDate: string | null; endDate: string | null; ownerId: string; playerIds: string[] }
 export interface Course { id: string; name: string; teeName: string; par: number; courseRating: number; slopeRating: number; holes: HoleInfo[] }
 export interface RoundPlayer { playerId: string; handicapIndexSnapshot: number; courseHandicap: number; playingHandicap: number }
@@ -56,9 +56,9 @@ export const SEED_HOLES: HoleInfo[] = STROKE_INDEX.map((strokeIndex, i) => {
 
 export function seedState(): State {
   const players: Player[] = [
-    { id: "p_matt", name: "Matt", handicapIndex: 5.2 },
-    { id: "p_marcus", name: "Marcus", handicapIndex: 11.4 },
-    { id: "p_ryan", name: "Ryan", handicapIndex: 8.7 },
+    { id: "p_matt", name: "Matt", handicapIndex: 5.2, venmo: "GTO-Demo-Matt" },
+    { id: "p_marcus", name: "Marcus", handicapIndex: 11.4, venmo: "GTO-Demo-Marcus" },
+    { id: "p_ryan", name: "Ryan", handicapIndex: 8.7, venmo: "GTO-Demo-Ryan" },
     { id: "p_john", name: "John", handicapIndex: 14.1 },
   ];
   const course: Course = { id: "c_pinehurst4", name: "Pinehurst No. 4", teeName: "Blue", par: SEED_HOLES.reduce((a, h) => a + h.par, 0), courseRating: 72.4, slopeRating: 135, holes: SEED_HOLES };
@@ -269,6 +269,30 @@ export function liveMoney(snap: Snapshot, playerId: string): number {
   const net = (list: { fromPlayerId: string; toPlayerId: string; amountCents: number }[]) => list.reduce((a, st) => a + (st.toPlayerId === playerId ? st.amountCents : 0) - (st.fromPlayerId === playerId ? st.amountCents : 0), 0);
   const games = snap.round.status === "LIVE" ? snap.games.flatMap((g) => g.projected) : snap.ledger.filter((e) => e.sourceType === "GAME");
   return net(games) + net(snap.ledger.filter((e) => e.sourceType === "SIDE_BET"));
+}
+
+/* ---------- settling up ---------- */
+/**
+ * Venmo usernames: 5–30 letters, numbers, hyphens or underscores. Accepts what people paste:
+ * "@Marcus-Lee", "venmo.com/u/Marcus-Lee", or a full profile link.
+ */
+export function normalizeVenmo(raw: string): string {
+  let h = raw.trim().replace(/^https?:\/\//i, "").replace(/^(account\.)?venmo\.com\/(u\/)?/i, "").replace(/^@/, "").replace(/[/?#].*$/, "");
+  h = h.trim();
+  if (!/^[A-Za-z0-9_-]{5,30}$/.test(h)) throw new Error("A Venmo username is 5 to 30 letters, numbers, - or _ (like Marcus-Lee-7).");
+  return h;
+}
+/** A player adds or clears their own Venmo; nobody else can change it. */
+export function setVenmo(state: State, playerId: string, raw: string | null) {
+  if (playerId !== state.actorId) throw new Error("Only the player can change their own Venmo");
+  const p = state.players.find((x) => x.id === playerId);
+  if (!p) return;
+  if (raw === null || raw.trim() === "") delete p.venmo; else p.venmo = normalizeVenmo(raw);
+}
+/** Fewest payments that clear this round's money (live: projected; locked: posted). */
+export function roundSettlement(snap: Snapshot) {
+  const balances = Object.fromEntries(snap.players.map((p) => [p.playerId, liveMoney(snap, p.playerId)]));
+  return optimizeSettlement(balances);
 }
 
 /* ---------- trips ---------- */
