@@ -5,7 +5,7 @@ import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { RoundReplay, replayableHoles } from "./Replay";
 import { SettleUpList, VenmoField } from "./SettleUp";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, holeFlightEnv, DEFAULT_WIND, roundSettlement, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, setTrackingOn, sgBaseline, trackingOn, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, holeFlightEnv, DEFAULT_WIND, roundSettlement, bagTips, applyBagTip, dismissBagTip, playerShots, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, setTrackingOn, sgBaseline, trackingOn, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist, hazardDistances } from "./holeGeometry";
@@ -711,6 +711,9 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
           onSetDistance={(id, yds) => withUndo((s) => setShotDistance(s, roundId, id, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
           onDelete={(id) => withUndo((s) => deleteShot(s, roundId, id))}
           sg={mySg ? { ...mySg, baseline: sgBaseline(state) } : null}
+          tips={bagTips(state, state.actorId)}
+          onApplyTip={(t) => mutate((s) => applyBagTip(s, s.actorId, t))}
+          onDismissTip={(t) => mutate((s) => dismissBagTip(s, s.actorId, t))}
         />
       )}
       {snap.round.status !== "LIVE" && <p className="text-sm text-muted text-center">This round is locked. Scores are read-only.</p>}
@@ -860,7 +863,7 @@ function StatsTab({ snap }: { snap: Snapshot }) {
         );
       })}
       <StrokesGainedCard snap={snap} />
-      <BagCard shots={snap.round.shots ?? []} playerId={state.actorId} playerName={snap.players.find((p) => p.playerId === state.actorId)?.displayName ?? ""} bag={state.players.find((p) => p.id === state.actorId)?.bag ?? {}} handicapIndex={state.players.find((p) => p.id === state.actorId)?.handicapIndex ?? 15} onProfile={(club, profile) => mutate((s) => setClubProfile(s, s.actorId, club, profile))} />
+      <BagCard tips={bagTips(state, state.actorId)} onApplyTip={(t) => mutate((s) => applyBagTip(s, s.actorId, t))} onDismissTip={(t) => mutate((s) => dismissBagTip(s, s.actorId, t))} shots={playerShots(state, state.actorId)} playerId={state.actorId} playerName={snap.players.find((p) => p.playerId === state.actorId)?.displayName ?? ""} bag={state.players.find((p) => p.id === state.actorId)?.bag ?? {}} handicapIndex={state.players.find((p) => p.id === state.actorId)?.handicapIndex ?? 15} onProfile={(club, profile) => mutate((s) => setClubProfile(s, s.actorId, club, profile))} />
       <p className="text-xs text-muted text-center">Percentages only count holes where that stat was entered. Nothing is inferred from the score.</p>
     </Page>
   );

@@ -1,18 +1,18 @@
 import { useEffect, useState } from "react";
 import { fmtSg, type SgBaseline } from "./strokesGained";
-import type { CaddieAdvice } from "./caddie";
+import { clubWords, type CaddieAdvice } from "./caddie";
 import type { SgShot, SgTotals } from "../src/domain/strategy/strokesGained";
 import { Card } from "./ui";
 import { CLUBS, missFromAim, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 import { dist, type Pt } from "./holeGeometry";
-import { defaultProfile, dispersionModel, FULL_SHOTS_TO_NUDGE, rollOf, type Bag, type ClubProfile, type DispersionModel, type MissBias, type MissWidth, TRUSTED_DISTANCE_SHOTS } from "./bag";
+import { defaultProfile, dispersionModel, FULL_SHOTS_TO_NUDGE, rollOf, type Bag, type BagTip, type ClubProfile, type DispersionModel, type MissBias, type MissWidth, TRUSTED_DISTANCE_SHOTS } from "./bag";
 import { describeAim, type Outcome, type Play, type Simulation, type Strategy } from "./strategy";
 
 const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "putt" ? "Putt" : c === "Dr" ? "Driver" : c);
 
 const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null; const lat = Math.round(Math.abs(m.lateral)), lng = Math.round(Math.abs(m.long)); return `${lat ? `${lat} ${m.lateral > 0 ? "R" : "L"}` : "on line"}${lng ? `, ${lng} ${m.long > 0 ? "long" : "short"}` : ""}`; };
 
-export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, strategy, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete, sg = null }: {
+export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, strategy, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete, sg = null, tips = [], onApplyTip, onDismissTip }: {
   shots: Shot[]; tracking: boolean; onToggle: () => void; selectedId: string | null; onSelect: (id: string | null) => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
   /** Yards from the ball to the pin, and the club that fits it. */
   remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void; onClubChange?: (club: Shot["club"]) => void; dispersion?: DispersionModel | null;
@@ -22,6 +22,8 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
   onAddDistance: (yards: number) => void; onSetDistance: (id: string, yards: number) => void; onDelete: (id: string) => void;
   /** Strokes gained per shot on this hole, and the hole's totals, against the chosen baseline. */
   sg?: { byId: Record<string, SgShot>; totals: SgTotals; baseline: SgBaseline } | null;
+  /** Bag tips for this player; the one for the club in hand shows under the club line. */
+  tips?: BagTip[]; onApplyTip?: (t: BagTip) => void; onDismissTip?: (t: BagTip) => void;
 }) {
   const setSelectedId = onSelect;
   const [typed, setTyped] = useState("");
@@ -74,6 +76,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
                   {aim && dispersion.samples < TRUSTED_DISTANCE_SHOTS && <span className="block text-muted" data-testid="follows-aim">The circle goes where you aim until it has learned your {clubLabel(club)} ({TRUSTED_DISTANCE_SHOTS - dispersion.samples} more aimed shot{TRUSTED_DISTANCE_SHOTS - dispersion.samples === 1 ? "" : "s"}).</span>}
                 </p>
               )}
+              {(() => { const t = tips.find((x) => x.club === club); return t ? <BagTipCard tip={t} compact onApply={() => onApplyTip?.(t)} onDismiss={() => onDismissTip?.(t)} /> : null; })()}
               {strategy && (strategy.current || strategy.plan) && (
                 <StrategyCard current={strategy.current} plan={strategy.plan} risk={strategy.risk} onRisk={strategy.onRisk} planned={strategy.planned ?? sg?.totals.planned ?? null} advice={strategy.advice ?? null} onPlay={(c, a) => { setPick({ forShot: shots.length, club: c }); strategy.onPlay(c, a); }} />
               )}
@@ -280,13 +283,35 @@ export function ShotFilterControl({ mode, playerIds, players, me, hasGroups, onC
   );
 }
 
-export function BagCard({ shots, playerId, playerName, bag, handicapIndex, onProfile }: { shots: Shot[]; playerId: string; playerName: string; bag: Bag; handicapIndex: number; onProfile: (club: Club, profile: ClubProfile | null) => void }) {
+/** "Your driver is leaking right…" — what the tracked shots say, with a one-tap update. */
+export function BagTipCard({ tip, onApply, onDismiss, compact = false }: { tip: BagTip; onApply: () => void; onDismiss: () => void; compact?: boolean }) {
+  const club = clubWords(tip.club).toLowerCase();
+  const parts: string[] = [];
+  if (tip.lateral !== null) parts.push(`leaking ${tip.lateral > 0 ? "right" : "left"} ${Math.abs(tip.lateral)} yards`);
+  if (tip.long !== null) parts.push(`carrying about ${tip.measuredCarry}, ${Math.abs(tip.long)} ${tip.long < 0 ? "shorter" : "longer"} than your bag says`);
+  const fixes: string[] = [];
+  if (tip.lateral !== null) fixes.push(`aim about ${Math.abs(tip.lateral)} ${tip.lateral > 0 ? "left" : "right"} to bring it back`);
+  if (tip.long !== null && tip.patch.carry) fixes.push(`plan on ${tip.patch.carry} carry`);
+  return (
+    <div className={`rounded-lg border border-brass bg-brass-soft ${compact ? "p-2 text-[12px]" : "p-2.5 text-sm"}`} data-testid="bag-tip">
+      <p className="text-ink"><b>Your {club} is {parts.join(", and ")}</b> on average ({tip.shots} aimed shots).</p>
+      <p className="text-ink-2 mt-0.5">Update your bag so the plays {fixes.join(" and ")}, and you hit more {tip.club === "Dr" || tip.club === "3W" || tip.club === "5W" ? "fairways" : "greens"}.</p>
+      <div className="flex gap-2 mt-2">
+        <button type="button" className="btn btn-primary !min-h-9 text-xs" onClick={onApply} data-testid="bag-tip-apply">Update my bag</button>
+        <button type="button" className="btn btn-secondary !min-h-9 text-xs" onClick={onDismiss} data-testid="bag-tip-dismiss">Not now</button>
+      </div>
+    </div>
+  );
+}
+
+export function BagCard({ shots, playerId, playerName, bag, handicapIndex, onProfile, tips = [], onApplyTip, onDismissTip }: { shots: Shot[]; playerId: string; playerName: string; bag: Bag; handicapIndex: number; onProfile: (club: Club, profile: ClubProfile | null) => void; tips?: BagTip[]; onApplyTip?: (t: BagTip) => void; onDismissTip?: (t: BagTip) => void }) {
   const [open, setOpen] = useState<Club | null>(null);
   const models = Object.fromEntries(CLUBS.map((c) => [c, dispersionModel(c, bag, handicapIndex, shots, playerId)])) as Record<Club, DispersionModel>;
   const set = (c: Club, patch: Partial<ClubProfile>) => onProfile(c, { ...(bag[c] ?? defaultProfile(c, handicapIndex)), ...patch });
   const missWord = (m: DispersionModel) => (Math.abs(m.center.lateral) < 2 ? "straight" : `${Math.round(Math.abs(m.center.lateral))} ${m.center.lateral > 0 ? "R" : "L"}`);
   return (
     <Card title={`${playerName} · my bag`} action={<span className="text-xs text-muted">tap a club to set it</span>}>
+      {tips.length > 0 && <div className="flex flex-col gap-2 mb-2">{tips.map((t) => <BagTipCard key={t.club} tip={t} onApply={() => onApplyTip?.(t)} onDismiss={() => onDismissTip?.(t)} />)}</div>}
       <div className="grid grid-cols-4 gap-1.5 text-center">
         {CLUBS.map((c) => {
           const m = models[c];

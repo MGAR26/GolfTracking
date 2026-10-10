@@ -18,7 +18,7 @@ import { finishShot, flightEnv, ROLL_FACTOR, type FlightEnv } from "./flight";
 import type { SgBaseline } from "./strokesGained";
 import { expectedStrokes } from "../src/domain/strategy/expectedStrokes";
 import type { RealCourse } from "./osmCourse";
-import { dispersionModel, plannedRoll, reachAlong, sampleShot, totalOf, type Bag, type ClubProfile } from "./bag";
+import { bagTip, dispersionModel, plannedRoll, reachAlong, sampleShot, totalOf, type Bag, type BagTip, type ClubProfile } from "./bag";
 import pinehurst4Json from "./courses/pinehurst-4.json";
 const PINEHURST_4 = pinehurst4Json as unknown as RealCourse;
 import { isPutt, shotFrom, suggestClub, CLUBS, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
@@ -37,7 +37,7 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean; /** Strokes gained shown against the player's own handicap or scratch. */ sgBaseline?: SgBaseline; /** Rounds where shot tracking is on, as round:player, so it stays on from hole to hole. */ tracking?: string[] }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean; /** Strokes gained shown against the player's own handicap or scratch. */ sgBaseline?: SgBaseline; /** Bag tips put off, as player:club → aimed-shot count at the time. */ dismissedBagTips?: Record<string, number>; /** Rounds where shot tracking is on, as round:player, so it stays on from hole to hole. */ tracking?: string[] }
 export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
@@ -142,11 +142,17 @@ function seedPlannedHole(state: State, round: Round, playerId: string, holeNumbe
     for (let i = 0; i < shape.line.length - 1; i++) { const a = shape.line[i], b = shape.line[i + 1]; if (u >= a.u && u <= b.u) { const f = (u - a.u) / (b.u - a.u || 1); return { u, v: a.v + (b.v - a.v) * f }; } }
     return shape.line[shape.line.length - 1];
   };
-  const targets: { to: Pt; club?: Club; kind: "safe" | "balanced" | "attack" }[] = [];
+  const targets: { to: Pt; club?: Club; kind: "safe" | "balanced" | "attack"; aim?: Pt }[] = [];
   if (par >= 4) {
     const t = TEE_PLAY[tee];
-    const p = along(Math.min(t.carry + (rnd(1) - 0.4) * 18, shape.length - 60));
-    targets.push({ to: { u: p.u, v: p.v + (rnd(2) - 0.5) * 2 * t.spray }, club: t.club, kind: tee });
+    const aimAt = along(Math.min(t.carry, shape.length - 60));
+    if (t.club === "Dr") {
+      // Matt's driver habit for the demo: leaks right ~16 and finishes ~6 short of where he aims
+      targets.push({ to: { u: aimAt.u - 6 + (rnd(1) - 0.5) * 14, v: aimAt.v + 16 + (rnd(2) - 0.5) * 20 }, club: t.club, kind: tee, aim: aimAt });
+    } else {
+      const p = along(Math.min(t.carry + (rnd(1) - 0.4) * 18, shape.length - 60));
+      targets.push({ to: { u: p.u, v: p.v + (rnd(2) - 0.5) * 2 * t.spray }, club: t.club, kind: tee, aim: aimAt });
+    }
     if (extra) { const q = along(Math.min(targets[0].to.u + 70, shape.length - 110)); targets.push({ to: { u: q.u, v: q.v + (rnd(3) - 0.5) * 12 }, kind: "safe" }); } // punch back to the fairway
     if (par === 5) { const q = along(shape.length - 95 - rnd(4) * 20); targets.push({ to: { u: q.u, v: q.v + (rnd(5) - 0.5) * 14 }, kind: tee === "attack" ? "attack" : "safe" }); }
   } else if (extra) {
@@ -161,7 +167,7 @@ function seedPlannedHole(state: State, round: Round, playerId: string, holeNumbe
     const l = lieAt(shape, tg.to);
     const startLie = i === 0 ? "tee" : (round.shots!.find((x) => x.id === `past_${round.id}_${holeNumber}_${i}`)?.lie ?? "fairway");
     round.shots!.push({
-      id: `past_${round.id}_${holeNumber}_${i + 1}`, ...base, club: tg.club ?? base.club, lie: last ? "green" : l === "water" ? "rough" : l,
+      id: `past_${round.id}_${holeNumber}_${i + 1}`, ...base, club: tg.club ?? base.club, lie: last ? "green" : l === "water" ? "rough" : l, aim: tg.aim ?? null,
       plan: { club: tg.club ?? base.club, aimOffset: 0, expected: expectedStrokes({ distanceYards: dist(from, green), lie: startLie === "fringe" ? "fairway" : startLie, handicapIndex: hcp }), kind: tg.kind },
     });
     from = tg.to;
@@ -232,9 +238,28 @@ export function setClubProfile(state: State, playerId: string, club: Club, profi
   if (profile) p.bag[club] = profile; else delete p.bag[club];
 }
 /** Dispersion for a player's club: their profile blended with their aimed shots. */
+/** Every shot a player has tracked, in every round: the bag learns from all of it. */
+export function playerShots(state: State, playerId: string): Shot[] {
+  return state.rounds.flatMap((r) => (r.shots ?? []).filter((s) => s.playerId === playerId));
+}
 export function playerDispersion(state: State, round: Round, playerId: string, club: Club) {
   const p = state.players.find((x) => x.id === playerId)!;
-  return dispersionModel(club, p.bag ?? {}, p.handicapIndex, round.shots ?? [], playerId);
+  return dispersionModel(club, p.bag ?? {}, p.handicapIndex, playerShots(state, playerId), playerId);
+}
+/** Bag tips the player hasn't put off: a dismissed tip comes back after 5 more aimed shots. */
+export function bagTips(state: State, playerId: string): BagTip[] {
+  const p = state.players.find((x) => x.id === playerId);
+  if (!p) return [];
+  const shots = playerShots(state, playerId);
+  return CLUBS.map((c) => bagTip(c, p.bag ?? {}, p.handicapIndex, shots, playerId)).filter((t): t is BagTip => !!t && (state.dismissedBagTips?.[`${playerId}:${t.club}`] ?? -Infinity) + 5 <= t.shots);
+}
+export function dismissBagTip(state: State, playerId: string, tip: BagTip) {
+  state.dismissedBagTips = { ...(state.dismissedBagTips ?? {}), [`${playerId}:${tip.club}`]: tip.shots };
+}
+export function applyBagTip(state: State, playerId: string, tip: BagTip) {
+  if (playerId !== state.actorId) throw new Error("Only the player can change their own bag");
+  const p = state.players.find((x) => x.id === playerId)!;
+  p.bag = { ...(p.bag ?? {}), [tip.club]: tip.patch as ClubProfile };
 }
 export function restoreBetNote(state: State, roundId: string, holeNumber: number, betId: string) {
   state.dismissedBetNotes = (state.dismissedBetNotes ?? []).filter((k) => k !== `${roundId}:${holeNumber}:${betId}`);

@@ -8,7 +8,7 @@ import { CLUBS, DEFAULT_CARRY, missFromAim, type Club, type Shot } from "./shots
 
 export type MissBias = "straight" | "left" | "right" | "two-way";
 export type MissWidth = "narrow" | "normal" | "wide";
-export interface ClubProfile { carry: number; /** Yards it runs after landing on fairway, normal turf. */ roll?: number; miss: MissBias; width: MissWidth }
+export interface ClubProfile { carry: number; /** Yards it runs after landing on fairway, normal turf. */ roll?: number; miss: MissBias; width: MissWidth; /** Measured average miss, yards right (+) or left (-) of the aim; set when the player accepts a bag tip. */ lateralBias?: number }
 /** Typical rollout on fairway, normal turf: long clubs run, wedges stop. */
 export const DEFAULT_ROLL: Record<Club, number> = { Dr: 20, "3W": 15, "5W": 12, Hy: 10, "4i": 8, "5i": 7, "6i": 5, "7i": 4, "8i": 3, "9i": 2, PW: 2, GW: 1, SW: 1, LW: 0 };
 export const rollOf = (club: Club, profile?: ClubProfile) => profile?.roll ?? DEFAULT_ROLL[club];
@@ -50,7 +50,8 @@ function priorModel(club: Club, profile: ClubProfile, handicapIndex: number) {
   const sdLateral = profile.carry * WIDTH_PCT[profile.width] * skill * (profile.miss === "two-way" ? 1.3 : 1);
   const sdLong = profile.carry * 0.055 * skill;
   const bias = profile.miss === "left" ? -0.6 : profile.miss === "right" ? 0.6 : 0;
-  return { club, carry: profile.carry, roll: rollOf(club, profile), center: { lateral: bias * sdLateral, long: 0 }, sdLateral, sdLong };
+  const lateral = profile.lateralBias ?? bias * sdLateral;
+  return { club, carry: profile.carry, roll: rollOf(club, profile), center: { lateral, long: 0 }, sdLateral, sdLong };
 }
 
 /**
@@ -170,3 +171,46 @@ export function sampleShot(model: DispersionModel, from: Pt, target: Pt, seed: n
 }
 
 export const CLUB_LIST = CLUBS;
+
+/* ---------- bag tips: what the tracked shots say that the bag doesn't ---------- */
+/** Aimed shots with a club before the app suggests changing the bag. */
+export const TIP_AFTER_SHOTS = 8;
+export interface BagTip {
+  club: Club;
+  /** Aimed shots the tip is based on. */
+  shots: number;
+  /** Average miss right (+) / left (-) of the aim, when it is a steady pattern the bag doesn't know. */
+  lateral: number | null;
+  /** Measured carry minus the carry in the bag (full swings: finish minus roll), when 5+ yards off. */
+  long: number | null;
+  /** Measured carry from full swings, when there are enough. */
+  measuredCarry: number | null;
+  /** What tapping "Update my bag" changes. */
+  patch: Partial<ClubProfile>;
+}
+/**
+ * Compare the player's aimed shots with what their bag says. A tip appears once a club has
+ * TIP_AFTER_SHOTS aimed shots and either a steady side miss (6+ yards on average, at least 60% of
+ * shots on that side) the bag doesn't already account for, or full swings that finish 5+ yards
+ * short or long of the aim on average.
+ */
+export function bagTip(club: Club, bag: Bag, handicapIndex: number, shots: Shot[], playerId: string): BagTip | null {
+  const profile = bag[club] ?? defaultProfile(club, handicapIndex);
+  const prior = priorModel(club, profile, handicapIndex);
+  const aimed = shots.filter((s) => s.playerId === playerId && s.club === club).map((s) => ({ s, m: missFromAim(s) })).filter((x): x is { s: Shot; m: { lateral: number; long: number } } => x.m !== null);
+  if (aimed.length < TIP_AFTER_SHOTS) return null;
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  const lat = mean(aimed.map((x) => x.m.lateral));
+  const sameSide = aimed.filter((x) => Math.sign(x.m.lateral) === Math.sign(lat)).length / aimed.length;
+  const lateralOff = lat - prior.center.lateral;
+  const lateral = Math.abs(lateralOff) >= 6 && sameSide >= 0.6 ? Math.round(lat) : null;
+  // distance: every full swing with the club (aimed or not), finish minus roll, against the bag's carry
+  const full = shots.filter((s) => s.playerId === playerId && s.club === club && isFullSwing(s, prior.carry + prior.roll));
+  const measuredCarry = full.length >= FULL_SHOTS_TO_NUDGE ? Math.round(mean(full.map((s) => s.distance - prior.roll))) : null;
+  const long = measuredCarry !== null && Math.abs(measuredCarry - profile.carry) >= 5 ? measuredCarry - profile.carry : null;
+  if (lateral === null && long === null) return null;
+  const patch: Partial<ClubProfile> = { ...profile };
+  if (lateral !== null) { patch.lateralBias = lateral; patch.miss = lateral > 0 ? "right" : "left"; }
+  if (long !== null && measuredCarry !== null) patch.carry = Math.max(20, measuredCarry);
+  return { club, shots: aimed.length, lateral, long, measuredCarry, patch };
+}
