@@ -24,6 +24,8 @@ export interface Simulation {
   penaltyProb: number;
   /** Mean yards left to the flag (0 when on the green counts its putting distance). */
   leave: number;
+  /** Where the play's shots finish on average: the target it is really aiming for. */
+  finish: Pt;
 }
 export type PlayKind = "safe" | "balanced" | "attack";
 export interface Play { kind: PlayKind; sim: Simulation }
@@ -39,14 +41,14 @@ export function utility(s: Simulation, risk: number): number {
 export function simulate(model: DispersionModel, from: Pt, aim: Pt, flag: Pt, hole: HoleShape, handicapIndex: number, n = 600, aimOffset = 0, env: FlightEnv = CALM, followAim = false): Simulation {
   const counts: Record<Outcome, number> = { fairway: 0, rough: 0, sand: 0, water: 0, green: 0 };
   const next: number[] = [];
-  let leaveSum = 0;
+  let leaveSum = 0, fu = 0, fv = 0;
   const roll = plannedRoll(model, reachAlong(model, dist(from, aim), followAim));
   for (let i = 0; i < n; i++) {
     const { rest: to, lie } = finishShot(env, hole, from, aim, sampleShot(model, from, aim, i * 7919 + Math.round(aim.v * 13) + model.club.length, followAim), roll);
     const outcome: Outcome = lie === "tee" ? "fairway" : lie;
     counts[outcome]++;
     const d = dist(to, flag);
-    leaveSum += d;
+    leaveSum += d; fu += to.u; fv += to.v;
     next.push(expectedStrokes({ distanceYards: d, lie: lie === "tee" ? "fairway" : lie, handicapIndex }));
   }
   next.sort((a, b) => a - b);
@@ -59,6 +61,7 @@ export function simulate(model: DispersionModel, from: Pt, aim: Pt, flag: Pt, ho
     p90: 1 + next[Math.floor(n * 0.9)],
     penaltyProb: counts.water / n,
     leave: leaveSum / n,
+    finish: { u: fu / n, v: fv / n },
   };
 }
 

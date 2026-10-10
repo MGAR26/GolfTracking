@@ -12,7 +12,7 @@ const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "putt" ? "
 
 const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null; const lat = Math.round(Math.abs(m.lateral)), lng = Math.round(Math.abs(m.long)); return `${lat ? `${lat} ${m.lateral > 0 ? "R" : "L"}` : "on line"}${lng ? `, ${lng} ${m.long > 0 ? "long" : "short"}` : ""}`; };
 
-export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, strategy, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete, sg = null, tips = [], onApplyTip, onDismissTip }: {
+export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, strategy, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete, sg = null, tips = [], onApplyTip, onDismissTip, aimVersion = 0 }: {
   shots: Shot[]; tracking: boolean; onToggle: () => void; selectedId: string | null; onSelect: (id: string | null) => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
   /** Yards from the ball to the pin, and the club that fits it. */
   remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void; onClubChange?: (club: Shot["club"]) => void; dispersion?: DispersionModel | null;
@@ -24,13 +24,16 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
   sg?: { byId: Record<string, SgShot>; totals: SgTotals; baseline: SgBaseline } | null;
   /** Bag tips for this player; the one for the club in hand shows under the club line. */
   tips?: BagTip[]; onApplyTip?: (t: BagTip) => void; onDismissTip?: (t: BagTip) => void;
+  /** Changes when the target is set or dragged on the picture. */
+  aimVersion?: number;
 }) {
   const setSelectedId = onSelect;
   const [typed, setTyped] = useState("");
   const [showTyped, setShowTyped] = useState(false);
   // Club for the next shot: the suggestion unless the player picked one for this exact shot.
-  const [pick, setPick] = useState<{ forShot: number; club: Shot["club"] } | null>(null);
-  const club = pick?.forShot === shots.length ? pick.club : suggested;
+  // the player's own pick holds for this shot until they move the target; then the suggestion follows the target
+  const [pick, setPick] = useState<{ forShot: number; club: Shot["club"]; v: number } | null>(null);
+  const club = pick?.forShot === shots.length && pick.v === aimVersion ? pick.club : suggested;
   useEffect(() => { onClubChange?.(club); }, [club, onClubChange]);
   // Draft text for the distance field so the user can clear it and retype without it snapping back.
   const [draft, setDraft] = useState<{ id: string; text: string } | null>(null);
@@ -60,14 +63,14 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
             <>
               <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-0.5" aria-label="Club for this shot">
                 {(["chip", ...CLUBS] as Shot["club"][]).map((c) => (
-                  <button key={c} type="button" aria-pressed={club === c} onClick={() => setPick({ forShot: shots.length, club: c })} className={`tap !min-h-8 shrink-0 rounded-full px-2.5 text-xs font-semibold border ${club === c ? "bg-ink text-[var(--bg)] border-ink" : c === suggested ? "bg-brass-soft border-brass" : "bg-surface border-line-strong"}`}>{clubLabel(c)}</button>
+                  <button key={c} type="button" aria-pressed={club === c} onClick={() => setPick({ forShot: shots.length, club: c, v: aimVersion })} className={`tap !min-h-8 shrink-0 rounded-full px-2.5 text-xs font-semibold border ${club === c ? "bg-ink text-[var(--bg)] border-ink" : c === suggested ? "bg-brass-soft border-brass" : "bg-surface border-line-strong"}`}>{clubLabel(c)}</button>
                 ))}
               </div>
               <div className="flex items-stretch gap-2">
                 <button type="button" className="btn btn-primary flex-1 !min-h-12 text-base" onClick={() => { onMark(club); setSelectedId(null); }} data-testid="mark-ball">
                   Mark ball <span className="font-normal opacity-80 text-sm">· {clubLabel(club)}</span>
                 </button>
-                <button type="button" aria-pressed={aimMode} onClick={onAimMode} className={`btn !min-h-12 text-sm whitespace-nowrap ${aimMode ? "btn-primary" : "btn-secondary"}`} data-testid="aim-toggle">{aimMode ? "Tap hole…" : aim ? "Aim ✓" : "Aim"}</button>
+                <button type="button" aria-pressed={aimMode} onClick={onAimMode} className={`btn !min-h-12 text-sm whitespace-nowrap ${aimMode ? "btn-primary" : "btn-secondary"}`} data-testid="aim-toggle">{aimMode ? "Tap hole…" : aim ? "Target ✓" : "Target"}</button>
               </div>
               {dispersion && club !== "chip" && club !== "putt" && (
                 <p className="text-[11px] text-ink-2" data-testid="dispersion-line">
@@ -78,7 +81,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
               )}
               {(() => { const t = tips.find((x) => x.club === club); return t ? <BagTipCard tip={t} compact onApply={() => onApplyTip?.(t)} onDismiss={() => onDismissTip?.(t)} /> : null; })()}
               {strategy && (strategy.current || strategy.plan) && (
-                <StrategyCard current={strategy.current} plan={strategy.plan} risk={strategy.risk} onRisk={strategy.onRisk} planned={strategy.planned ?? sg?.totals.planned ?? null} advice={strategy.advice ?? null} onPlay={(c, a) => { setPick({ forShot: shots.length, club: c }); strategy.onPlay(c, a); }} />
+                <StrategyCard current={strategy.current} plan={strategy.plan} risk={strategy.risk} onRisk={strategy.onRisk} planned={strategy.planned ?? sg?.totals.planned ?? null} advice={strategy.advice ?? null} onPlay={(c, a) => { setPick({ forShot: shots.length, club: c, v: aimVersion }); strategy.onPlay(c, a); }} />
               )}
               <p className="text-[11px] text-muted">
                 On the course GPS marks the spot when you press it. In this demo it drops the ball down the line for the club;{" "}

@@ -15,6 +15,7 @@ import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlem
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
 import { buildHole, buildRealHole, dist, holeConditions, lieAt, type Conditions, type HoleShape, type Pt } from "./holeGeometry";
 import { finishShot, flightEnv, ROLL_FACTOR, type FlightEnv } from "./flight";
+import { clubForTarget, solveAim, type AimSolution } from "./aiming";
 import type { SgBaseline } from "./strokesGained";
 import { expectedStrokes } from "../src/domain/strategy/expectedStrokes";
 import type { RealCourse } from "./osmCourse";
@@ -596,7 +597,7 @@ export function holeShots(round: Round, playerId: string, holeNumber: number): S
   return (round.shots ?? []).filter((s) => s.playerId === playerId && s.holeNumber === holeNumber).sort((a, b) => a.seq - b.seq);
 }
 /** "I'm here": the ball came to rest at `to`; the previous rest point (or the tee) is where the shot started. */
-export function logShot(state: State, roundId: string, playerId: string, holeNumber: number, to: Pt, opts: { club?: Shot["club"]; holed?: boolean; plan?: Shot["plan"] } = {}): Shot {
+export function logShot(state: State, roundId: string, playerId: string, holeNumber: number, to: Pt, opts: { club?: Shot["club"]; holed?: boolean; plan?: Shot["plan"]; aimPlan?: AimSolution } = {}): Shot {
   const round = state.rounds.find((r) => r.id === roundId)!;
   round.shots ??= [];
   const prior = holeShots(round, playerId, holeNumber);
@@ -606,6 +607,11 @@ export function logShot(state: State, roundId: string, playerId: string, holeNum
   const shot: Shot = { id: uid(), ...shotFrom(from, to, playerId, holeNumber, prior.length + 1, round.shots, aim) };
   shot.lie = autoLie(state, round, holeNumber, to);
   if (opts.club) shot.club = opts.club;
+  if (aim && shot.club !== "putt" && shot.club !== "chip") {
+    // keep where the app said to start it and where a neutral swing would have finished, so the miss excludes the wind
+    const plan = opts.aimPlan ?? aimPlan(state, round, playerId, holeNumber, shot.club, from, aim);
+    shot.aimLine = plan.aimLine; shot.expected = plan.expected;
+  }
   if (opts.holed) shot.holed = true;
   if (opts.plan) shot.plan = opts.plan;
   round.shots.push(shot);
@@ -629,6 +635,14 @@ export function holeFlightEnv(state: State, courseId: string, holeNumber: number
   const shape = holeShapeFor(state, courseId, holeNumber);
   const bearing = shape.bearingDeg ?? holeConditions(holeNumber, shape.par).bearingDeg;
   return flightEnv(state.wind ?? DEFAULT_WIND, bearing, shape, ROLL_FACTOR[state.conditions?.firmness ?? "normal"]);
+}
+/** Where to start a shot with `club` so it finishes at `target` (wind, slope, roll, usual miss). */
+export function aimPlan(state: State, round: Round, playerId: string, holeNumber: number, club: Club, from: Pt, target: Pt): AimSolution {
+  return solveAim(playerDispersion(state, round, playerId, club), holeFlightEnv(state, round.courseId, holeNumber), from, target, true);
+}
+/** The club whose full swing, in today's conditions, finishes nearest the target. */
+export function clubForTargetFor(state: State, round: Round, playerId: string, holeNumber: number, from: Pt, target: Pt): Club | "chip" {
+  return clubForTarget(CLUBS.map((club) => ({ club, model: playerDispersion(state, round, playerId, club) })), holeFlightEnv(state, round.courseId, holeNumber), from, target);
 }
 export function setCourseGeometry(state: State, courseId: string, course: RealCourse | null) {
   state.courseGeometry ??= {};
@@ -658,9 +672,14 @@ export function markBall(state: State, roundId: string, playerId: string, holeNu
   } else {
     // Demo stand-in for GPS: one draw from the player's own dispersion model for that club.
     const player = state.players.find((p) => p.id === playerId)!;
-    const model = dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId);
-    const roll = plannedRoll(model, reachAlong(model, dist(from, target), !!aimed));
-    to = finishShot(holeFlightEnv(state, round.courseId, holeNumber), holeShape(state, round, holeNumber), from, target, sampleShot(model, from, target, seed, !!aimed), roll).rest;
+    const model = dispersionModel(club, player.bag ?? {}, player.handicapIndex, playerShots(state, playerId), playerId);
+    const env = holeFlightEnv(state, round.courseId, holeNumber);
+    // with a target, the player starts it on the app's aim line; without one, straight at the flag
+    const sol = aimed ? solveAim(model, env, from, aimed, true) : null;
+    const line = sol?.aimLine ?? target;
+    const roll = plannedRoll(model, reachAlong(model, dist(from, line), !!aimed));
+    to = finishShot(env, holeShape(state, round, holeNumber), from, line, sampleShot(model, from, line, seed, !!aimed), roll).rest;
+    if (sol) return logShot(state, roundId, playerId, holeNumber, to, { club, plan, aimPlan: sol });
   }
   return logShot(state, roundId, playerId, holeNumber, to, { club, plan });
 }

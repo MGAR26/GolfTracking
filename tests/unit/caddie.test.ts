@@ -7,7 +7,7 @@ import type { Club } from "../../prototype/shots";
 const from = { u: 0, v: 0 };
 const sim = (club: Club, carry: number, off: number, expected: number, odds: Partial<Simulation["odds"]> = {}, leave = 140): Simulation => ({
   club, aim: { u: carry, v: off }, aimOffset: off, samples: 500, expected, p10: expected - 0.5, p90: expected + 0.6, penaltyProb: odds.water ?? 0, leave,
-  odds: { fairway: 0.6, rough: 0.3, sand: 0, water: 0, green: 0, ...odds },
+  odds: { fairway: 0.6, rough: 0.3, sand: 0, water: 0, green: 0, ...odds }, finish: { u: carry, v: off },
 });
 const plan = (rec: Simulation, attack: Simulation, safe: Simulation): Strategy => ({ candidates: [rec, attack, safe], plays: [{ kind: "safe", sim: safe }, { kind: "balanced", sim: rec }, { kind: "attack", sim: attack }], recommended: rec, risk: 0 });
 const bunkerR: HazardDistance = { kind: "bunker", side: "R", to: 225, carry: 252, at: { u: 225, v: 20 }, farAt: { u: 252, v: 25 } };

@@ -23,8 +23,12 @@ export interface Shot {
   shape: Shape | null;
   trajectory: Trajectory | null;
   lie: Lie | null;
-  /** Where the player intended the ball to finish, set before the shot. */
+  /** Where the player wanted the ball to finish (their target), set before the shot. */
   aim?: Pt | null;
+  /** Where the app said to start it (aim line), allowing for wind, roll, slope and their usual miss. */
+  aimLine?: Pt | null;
+  /** Where a neutral swing at the aim line finishes in the conditions: the reference for the miss. */
+  expected?: Pt | null;
   /** A putt that dropped: the hole is complete at this shot. */
   holed?: boolean;
   /** The play chosen before the shot: its club, aim offset and the strokes it promised from here (1 + average leave). */
@@ -32,16 +36,20 @@ export interface Shot {
 }
 export const isPutt = (s: Shot) => s.club === "putt";
 
-/** Miss relative to the aim point: lateral (+ right of the line from→aim) and long (+ past the aim). */
+/**
+ * The swing's miss: lateral (+ right) and long (+ past), measured from where a neutral swing at the
+ * aim line would have finished in that day's conditions (so wind and roll aren't counted as a miss).
+ * Older shots without that reference are measured from the target.
+ */
 export function missFromAim(shot: Shot): { lateral: number; long: number } | null {
   if (!shot.aim) return null;
-  const du = shot.aim.u - shot.from.u, dv = shot.aim.v - shot.from.v;
+  const ref = shot.expected ?? shot.aim;
+  const line = shot.aimLine ?? shot.aim;
+  const du = line.u - shot.from.u, dv = line.v - shot.from.v;
   const len = Math.hypot(du, dv) || 1;
   const fu = du / len, fv = dv / len;
-  const ru = shot.to.u - shot.from.u, rv = shot.to.v - shot.from.v;
-  const along = ru * fu + rv * fv;
-  const lateral = -ru * fv + rv * fu;
-  return { lateral, long: along - len };
+  const ru = shot.to.u - ref.u, rv = shot.to.v - ref.v;
+  return { lateral: -ru * fv + rv * fu, long: ru * fu + rv * fv };
 }
 
 /** Average miss per club from shots that had an aim point. */

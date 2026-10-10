@@ -230,9 +230,9 @@ export const TRAIL_COLORS = ["#e4572e", "#3a86ff", "#ffd166", "#c77dff", "#00b4d
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange, satellite = true, onSatelliteChange, flight = null }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange, satellite = true, onSatelliteChange, flight = null, aimLine = null }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void; /** Draw the baked satellite photo under the shapes (when the course has one). */ satellite?: boolean; onSatelliteChange?: (on: boolean) => void; /** Wind and ground for drawing where shots really land. */ flight?: FlightEnv | null;
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void; /** Draw the baked satellite photo under the shapes (when the course has one). */ satellite?: boolean; onSatelliteChange?: (on: boolean) => void; /** Wind and ground for drawing where shots really land. */ flight?: FlightEnv | null; /** Where to start the shot so it finishes at the target (aim), and how far off the target line. */ aimLine?: { at: Pt; offset: number } | null;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
@@ -479,7 +479,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {layups.map((l, i) => { const q = view.project(l.point); const left = i % 2 === 1; const underAim = !!aimPt && Math.hypot(aimPt.x - q.x, aimPt.y - q.y) < 16; return <g key={l.n}><circle cx={q.x} cy={q.y} r={4} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1.2} />{!underAim && <text x={left ? q.x - 6 : q.x + 6} y={q.y + 3} textAnchor={left ? "end" : "start"} {...label}>{l.n} in</text>}</g>; })}
           {/* personal dispersion for the selected club: 80% zone, 50% core, expected finish */}
           {dispersion && tracking && (() => {
-            const target = aim ?? flag;
+            const target = aimLine?.at ?? aim ?? flag; // the swing starts on the aim line
             // where the club's misses land in today's wind and on this ground, not in still air
             const fly = (p: Pt) => (flight ? applyFlight(flight, pos, target, p) : p);
             const outer = polyPath(view, dispersionOutline(dispersion, pos, target, 0.8, 40, !!aim).map(fly));
@@ -498,6 +498,18 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             );
           })()}
           {/* aim point for the next shot */}
+          {/* where to start it: shifted for wind, roll, slope and the usual miss so it finishes on the target */}
+          {aimPt && aim && aimLine && Math.abs(aimLine.offset) >= 2 && ahead(aimLine.at) && (() => {
+            const q = view.project(aimLine.at);
+            return (
+              <g data-testid="aim-line" pointerEvents="none">
+                <path d={linePath(view, pos, aimLine.at)} stroke="#f7f3ea" strokeWidth={1} strokeDasharray="1 3" fill="none" opacity={0.9} />
+                <circle cx={q.x} cy={q.y} r={5} fill="none" stroke="#b08d3c" strokeWidth={1.6} />
+                <circle cx={q.x} cy={q.y} r={1.4} fill="#b08d3c" />
+                <text x={aimLine.offset < 0 ? q.x - 8 : q.x + 8} y={q.y - 7} textAnchor={aimLine.offset < 0 ? "end" : "start"} {...label}>aim {Math.abs(aimLine.offset)} {aimLine.offset > 0 ? "R" : "L"}</text>
+              </g>
+            );
+          })()}
           {aimPt && aim && (
             <g data-testid="aim-marker">
               <path d={linePath(view, pos, aim)} stroke="#b08d3c" strokeWidth={1.2} strokeDasharray="2 2" fill="none" />
@@ -505,7 +517,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <circle cx={aimPt.x} cy={aimPt.y} r={2} fill="#f7f3ea" />
               <line x1={aimPt.x - 13} y1={aimPt.y} x2={aimPt.x - 5} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x + 5} y1={aimPt.y} x2={aimPt.x + 13} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} />
               <line x1={aimPt.x} y1={aimPt.y - 13} x2={aimPt.x} y2={aimPt.y - 5} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x} y1={aimPt.y + 5} x2={aimPt.x} y2={aimPt.y + 13} stroke="#f7f3ea" strokeWidth={1.2} />
-              <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>aim {Math.round(aimDist ?? 0)}</text>
+              <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>target {Math.round(aimDist ?? 0)}</text>
               <circle cx={aimPt.x} cy={aimPt.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("aim")} data-testid="aim-handle" aria-label="Drag aim point" />
             </g>
           )}
@@ -570,10 +582,10 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             ))}
           </div>
         )}
-        {aimMode && <div className="absolute bottom-3 left-2 pointer-events-none"><span className="rounded-md bg-brass px-3 py-1 text-[11px] font-semibold text-ink">Tap where you&apos;re aiming</span></div>}
-        <button type="button" onClick={onAimButton} aria-pressed={aimMode} data-testid="aim-fab" className={`absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-2 text-xs font-semibold shadow-lg ${aimMode ? "bg-brass text-ink" : aim ? "bg-[var(--bg)] text-ink" : "bg-ink/85 text-[var(--bg)]"}`} aria-label={aimMode ? "Cancel aiming" : aim ? "Move aim point" : "Set aim point"}>
+        {aimMode && <div className="absolute bottom-3 left-2 pointer-events-none"><span className="rounded-md bg-brass px-3 py-1 text-[11px] font-semibold text-ink">Tap where you want it to finish</span></div>}
+        <button type="button" onClick={onAimButton} aria-pressed={aimMode} data-testid="aim-fab" className={`absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-2 text-xs font-semibold shadow-lg ${aimMode ? "bg-brass text-ink" : aim ? "bg-[var(--bg)] text-ink" : "bg-ink/85 text-[var(--bg)]"}`} aria-label={aimMode ? "Cancel target" : aim ? "Move target" : "Set target"}>
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" /><line x1="12" y1="1" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="1" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="23" y2="12" /></svg>
-          {aimMode ? "Cancel" : aim ? `Aim ${Math.round(aimDist ?? 0)}` : "Aim"}
+          {aimMode ? "Cancel" : aim ? `Target ${Math.round(aimDist ?? 0)}` : "Target"}
         </button>
       </div>
       <div className="px-3 py-2 border-t border-line flex flex-col gap-2">
@@ -625,11 +637,11 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
         <p className="text-[10px] text-muted">
           {atTee ? "From the tee" : `${Math.round(dist(pos, hole.tee))} yds from the tee`} · yards · Ball follows you and zooms to what&apos;s left (straight down inside 40), Hole shows the whole hole, Green looks straight down on the green, Fly flies tee to green · pinch to zoom ·{" "}
           {hole.photo && <>{photo ? `${photo.attribution} · ` : "drawn layout · "}<button type="button" className="text-accent font-semibold" onClick={() => onSatelliteChange?.(!satellite)} data-testid="satellite-toggle">{photo ? "hide satellite" : "show satellite"}</button> ·{" "}</>}
-          {tracking ? (aimMode ? "tap the hole to set your aim" : "tap where your ball came to rest, or drag a ball or the aim point to move it (GPS marks it in the app)") : "tap the hole or drag the dot to move (GPS does this in the app)"}
+          {tracking ? (aimMode ? "tap where you want it to finish; the gold ring shows where to start it" : "tap where your ball came to rest, or drag a ball or the target to move it (GPS marks it in the app)") : "tap the hole or drag the dot to move (GPS does this in the app)"}
         </p>
         {shots.some((s) => s.aim) && (
           <p className="text-[10px] text-muted" data-testid="miss-summary">
-            {shots.filter((s) => s.aim).map((s) => { const m = missFromAim(s)!; return `Shot ${s.seq}: ${Math.round(Math.abs(m.lateral))} yds ${m.lateral >= 0 ? "right" : "left"} of aim, ${Math.round(Math.abs(m.long))} ${m.long >= 0 ? "long" : "short"}`; }).join(" · ")}
+            {shots.filter((s) => s.aim).map((s) => { const m = missFromAim(s)!; return `Shot ${s.seq}: ${Math.round(Math.abs(m.lateral))} yds ${m.lateral >= 0 ? "right" : "left"}, ${Math.round(Math.abs(m.long))} ${m.long >= 0 ? "long" : "short"}${s.expected ? " of where it should have finished" : " of target"}`; }).join(" · ")}
           </p>
         )}
       </div>
