@@ -281,15 +281,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const d = greenDistances(pos, hole.green, hole.greenOutline);
   const atTee = dist(pos, hole.tee) < 1;
 
-  const pointAlong = (uTarget: number): Pt => {
-    for (let i = 0; i < hole.line.length - 1; i++) {
-      const a = hole.line[i], b = hole.line[i + 1];
-      if (uTarget >= a.u && uTarget <= b.u) { const f = (uTarget - a.u) / (b.u - a.u || 1); return { u: uTarget, v: a.v + (b.v - a.v) * f }; }
-    }
-    return hole.line[hole.line.length - 1];
-  };
   const ahead = (p: Pt) => view.toView(p).u > view.near + 2;
-  const markers = [100, 150, 200].filter((m) => m < hole.length - 30).map((m) => ({ m, p: pointAlong(m) })).filter(({ p }) => ahead(p));
   const photo = satellite && hole.photo ? hole.photo : null;
   const trees = (photo ? [] : hole.trees).filter(ahead).sort((a, b) => view.toView(b).u - view.toView(a).u);
 
@@ -376,7 +368,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const hazards = hazardDistances(pos, flag, hole).slice(0, 3);
   const fallScreen = (() => { const a = view.project(flag), b = view.project({ u: flag.u + cond.tilt.u * 5, v: flag.v + cond.tilt.v * 5 }); return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI + 90; })();
   const day: Conditions = { ...DEFAULT_CONDITIONS, ...(conditions ?? {}) };
-  const pl = playsLike(pos, flag, hole.length, cond, wind, day, hole.elevation);
+  // With a target set, everything about the shot (plays-like, wind split, crosswind) is along the line to it.
+  const toTarget = !!(aim && tracking);
+  const pl = playsLike(pos, toTarget ? aim! : flag, hole.length, cond, wind, day, hole.elevation);
   // Wind arrow relative to the view: 0° = up the screen (the direction you're facing).
   const shotBearing = pl.shotBearingDeg;
   const windRel = ((wind.fromDeg + 180 - shotBearing) % 360 + 360) % 360;
@@ -423,7 +417,6 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {!hole.real && <path d={polyPath(view, [{ u: -3, v: -7 }, { u: 5, v: -7 }, { u: 5, v: 7 }, { u: -3, v: 7 }])} fill="#b3dc8c" stroke="#79a95a" strokeWidth={0.8} />}
           {/* line of play */}
           <path d={linePath(view, pos, flag)} stroke="#f7f3ea" strokeWidth={1.4} strokeDasharray="4 3" fill="none" opacity={0.9} />
-          {markers.map(({ m, p }) => { const q = view.project(p); return <g key={m}><circle cx={q.x} cy={q.y} r={2.2} fill="#f7f3ea" /><text x={q.x + 5} y={q.y + 3} {...label}>{m}</text></g>; })}
           {/* flag */}
           <line x1={fl.x} y1={fl.y} x2={fl.x} y2={fl.y - 22 * Math.min(1, fl.s * 3)} stroke="#f7f3ea" strokeWidth={1.3} />
           <path d={`M${fl.x} ${fl.y - 22 * Math.min(1, fl.s * 3)} l8 3.5 l-8 3.5 z`} fill="#7a1f2b" />
@@ -476,7 +469,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             );
           })}
           {/* lay-up spots for "your numbers" */}
-          {layups.map((l, i) => { const q = view.project(l.point); const left = i % 2 === 1; const underAim = !!aimPt && Math.hypot(aimPt.x - q.x, aimPt.y - q.y) < 16; return <g key={l.n}><circle cx={q.x} cy={q.y} r={4} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1.2} />{!underAim && <text x={left ? q.x - 6 : q.x + 6} y={q.y + 3} textAnchor={left ? "end" : "start"} {...label}>{l.n} in</text>}</g>; })}
+          {!toTarget && layups.map((l, i) => { const q = view.project(l.point); const left = i % 2 === 1; const underAim = !!aimPt && Math.hypot(aimPt.x - q.x, aimPt.y - q.y) < 16; return <g key={l.n}><circle cx={q.x} cy={q.y} r={4} fill="#b08d3c" stroke="#f7f3ea" strokeWidth={1.2} />{!underAim && <text x={left ? q.x - 6 : q.x + 6} y={q.y + 3} textAnchor={left ? "end" : "start"} {...label}>{l.n} in</text>}</g>; })}
           {/* personal dispersion for the selected club: 80% zone, 50% core, expected finish */}
           {dispersion && tracking && (() => {
             const target = aimLine?.at ?? aim ?? flag; // the swing starts on the aim line
@@ -506,7 +499,6 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
                 <path d={linePath(view, pos, aimLine.at)} stroke="#f7f3ea" strokeWidth={1} strokeDasharray="1 3" fill="none" opacity={0.9} />
                 <circle cx={q.x} cy={q.y} r={5} fill="none" stroke="#b08d3c" strokeWidth={1.6} />
                 <circle cx={q.x} cy={q.y} r={1.4} fill="#b08d3c" />
-                <text x={aimLine.offset < 0 ? q.x - 8 : q.x + 8} y={q.y - 7} textAnchor={aimLine.offset < 0 ? "end" : "start"} {...label}>aim {Math.abs(aimLine.offset)} {aimLine.offset > 0 ? "R" : "L"}</text>
               </g>
             );
           })()}
@@ -517,7 +509,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <circle cx={aimPt.x} cy={aimPt.y} r={2} fill="#f7f3ea" />
               <line x1={aimPt.x - 13} y1={aimPt.y} x2={aimPt.x - 5} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x + 5} y1={aimPt.y} x2={aimPt.x + 13} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} />
               <line x1={aimPt.x} y1={aimPt.y - 13} x2={aimPt.x} y2={aimPt.y - 5} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x} y1={aimPt.y + 5} x2={aimPt.x} y2={aimPt.y + 13} stroke="#f7f3ea" strokeWidth={1.2} />
-              <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>target {Math.round(aimDist ?? 0)}</text>
+              <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>target {Math.round(aimDist ?? 0)}{toTarget ? ` · plays ${Math.round(pl.playsLike)}` : ""}</text>
+              {aimLine && Math.abs(aimLine.offset) >= 2 && <text x={aimPt.x + 15} y={aimPt.y + 13} {...label} fill="#e9cf8f" data-testid="aim-offset">start it {Math.abs(aimLine.offset)} {aimLine.offset > 0 ? "right" : "left"}</text>}
               <circle cx={aimPt.x} cy={aimPt.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("aim")} data-testid="aim-handle" aria-label="Drag aim point" />
             </g>
           )}
@@ -562,7 +555,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             </div>
           </div>
           <div className="rounded-lg bg-brass w-[116px] py-1 leading-none text-ink flex items-baseline justify-center gap-1.5" data-testid="plays-like">
-            <span className="text-[8px] uppercase tracking-wide font-semibold">Plays like</span>
+            <span className="text-[8px] uppercase tracking-wide font-semibold leading-tight text-right">Plays like<br />{toTarget ? "to target" : "to middle"}</span>
             <span className="font-display text-base">{Math.round(pl.playsLike)}</span>
           </div>
         </div>
@@ -585,13 +578,13 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
         {aimMode && <div className="absolute bottom-3 left-2 pointer-events-none"><span className="rounded-md bg-brass px-3 py-1 text-[11px] font-semibold text-ink">Tap where you want it to finish</span></div>}
         <button type="button" onClick={onAimButton} aria-pressed={aimMode} data-testid="aim-fab" className={`absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-2 text-xs font-semibold shadow-lg ${aimMode ? "bg-brass text-ink" : aim ? "bg-[var(--bg)] text-ink" : "bg-ink/85 text-[var(--bg)]"}`} aria-label={aimMode ? "Cancel target" : aim ? "Move target" : "Set target"}>
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" /><line x1="12" y1="1" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="1" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="23" y2="12" /></svg>
-          {aimMode ? "Cancel" : aim ? `Target ${Math.round(aimDist ?? 0)}` : "Target"}
+          {aimMode ? "Cancel" : aim ? `Target ${Math.round(aimDist ?? 0)}${toTarget ? ` · plays ${Math.round(pl.playsLike)}` : ""}` : "Target"}
         </button>
       </div>
       <div className="px-3 py-2 border-t border-line flex flex-col gap-2">
         {hole.elevation && <ElevationProfile profile={hole.elevation} pos={pos} flag={flag} length={hole.length} />}
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="plays-like-breakdown">
-          <span className="font-semibold text-ink">Plays like {Math.round(pl.playsLike)} to the middle</span>
+          <span className="font-semibold text-ink">{toTarget ? `Target ${Math.round(pl.distance)} plays like ${Math.round(pl.playsLike)}` : `Plays like ${Math.round(pl.playsLike)} to the middle`}</span>
           {pl.factors.map((f) => <span key={f.key} className="text-ink-2">{f.label} {fmtAdj(f.yards)}</span>)}
           {Math.abs(pl.crosswindMph) >= 3 && <span className="text-ink-2">{Math.round(Math.abs(pl.crosswindMph))} mph across {pl.crosswindMph > 0 ? "L→R" : "R→L"}</span>}
           <span className={`font-semibold ${pl.confidence === "high" ? "text-brass" : pl.confidence === "medium" ? "text-ink-2" : "text-muted"}`} data-testid="plays-like-confidence">{pl.confidence} confidence</span>
@@ -662,7 +655,6 @@ export function ReplayScene({ hole, holeNumber, t, trails, satellite = true }: {
   const photo = satellite && hole.photo ? hole.photo : null;
   const fl = view.project(flag);
   const ahead = (p: Pt) => view.toView(p).u > view.near + 2;
-  const markers = [100, 150, 200].filter((m) => m < hole.length - 30).map((m) => ({ m, p: pointOnLine(hole, m) })).filter(({ p }) => ahead(p));
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="block w-full h-auto select-none" role="img" aria-label={`Replay of hole ${holeNumber}`} data-testid="replay-scene">
       <defs>
@@ -676,7 +668,6 @@ export function ReplayScene({ hole, holeNumber, t, trails, satellite = true }: {
       {bunkerOutlines(hole).map((b, i) => <path key={i} d={polyPath(view, b)} fill="#e8dcb0" fillOpacity={photo ? 0.25 : 1} stroke="#cbbb84" strokeWidth={0.8} />)}
       <path d={polyPath(view, greenOutline(hole))} fill="#b3dc8c" fillOpacity={photo ? 0.3 : 1} stroke="#79a95a" strokeWidth={1} />
       <path d={linePath(view, { u: 0, v: 0 }, flag)} stroke="#f7f3ea" strokeWidth={1.2} strokeDasharray="4 3" fill="none" opacity={0.7} />
-      {markers.map(({ m, p }) => { const q = view.project(p); return <g key={m}><circle cx={q.x} cy={q.y} r={2.2} fill="#f7f3ea" /><text x={q.x + 5} y={q.y + 3} {...label}>{m}</text></g>; })}
       <line x1={fl.x} y1={fl.y} x2={fl.x} y2={fl.y - 22 * Math.min(1, fl.s * 3)} stroke="#f7f3ea" strokeWidth={1.3} />
       <path d={`M${fl.x} ${fl.y - 22 * Math.min(1, fl.s * 3)} l8 3.5 l-8 3.5 z`} fill="#7a1f2b" />
       {trails.map((tr) => tr.shots.map(({ shot, progress }, i) => {
