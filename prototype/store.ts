@@ -14,11 +14,11 @@ import { optimizeSettlement } from "../src/domain/settlement";
 import { assertCanAccept, assertCanSettle, autoResolve, isFullyAccepted, settlementsForSideBet, type SideBet, type SideBetType } from "../src/domain/side-bets";
 import { canEditScore, type ScoringMode, type TripRole } from "../src/server/services/permissions";
 import { buildHole, buildRealHole, dist, holeConditions, lieAt, type Conditions, type HoleShape, type Pt } from "./holeGeometry";
-import { applyFlight, flightEnv, type FlightEnv } from "./flight";
+import { finishShot, flightEnv, ROLL_FACTOR, type FlightEnv } from "./flight";
 import type { SgBaseline } from "./strokesGained";
 import { expectedStrokes } from "../src/domain/strategy/expectedStrokes";
 import type { RealCourse } from "./osmCourse";
-import { dispersionModel, sampleShot, type Bag, type ClubProfile } from "./bag";
+import { dispersionModel, plannedRoll, reachAlong, sampleShot, totalOf, type Bag, type ClubProfile } from "./bag";
 import pinehurst4Json from "./courses/pinehurst-4.json";
 const PINEHURST_4 = pinehurst4Json as unknown as RealCourse;
 import { isPutt, shotFrom, suggestClub, CLUBS, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
@@ -603,7 +603,7 @@ export const DEFAULT_WIND = { mph: 12, fromDeg: 225 };
 export function holeFlightEnv(state: State, courseId: string, holeNumber: number): FlightEnv {
   const shape = holeShapeFor(state, courseId, holeNumber);
   const bearing = shape.bearingDeg ?? holeConditions(holeNumber, shape.par).bearingDeg;
-  return flightEnv(state.wind ?? DEFAULT_WIND, bearing, shape);
+  return flightEnv(state.wind ?? DEFAULT_WIND, bearing, shape, ROLL_FACTOR[state.conditions?.firmness ?? "normal"]);
 }
 export function setCourseGeometry(state: State, courseId: string, course: RealCourse | null) {
   state.courseGeometry ??= {};
@@ -633,7 +633,9 @@ export function markBall(state: State, roundId: string, playerId: string, holeNu
   } else {
     // Demo stand-in for GPS: one draw from the player's own dispersion model for that club.
     const player = state.players.find((p) => p.id === playerId)!;
-    to = applyFlight(holeFlightEnv(state, round.courseId, holeNumber), from, target, sampleShot(dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId), from, target, seed, !!aimed));
+    const model = dispersionModel(club, player.bag ?? {}, player.handicapIndex, round.shots ?? [], playerId);
+    const roll = plannedRoll(model, reachAlong(model, dist(from, target), !!aimed));
+    to = finishShot(holeFlightEnv(state, round.courseId, holeNumber), holeShape(state, round, holeNumber), from, target, sampleShot(model, from, target, seed, !!aimed), roll).rest;
   }
   return logShot(state, roundId, playerId, holeNumber, to, { club, plan });
 }
@@ -655,7 +657,8 @@ export function logPutt(state: State, roundId: string, playerId: string, holeNum
 export function clubForRemaining(state: State, round: Round, playerId: string, remaining: number): Club | "chip" {
   if (remaining < 30) return "chip";
   let best: Club = "Dr", bestDiff = Infinity;
-  for (const c of CLUBS) { const diff = Math.abs(playerDispersion(state, round, playerId, c).carry - remaining); if (diff < bestDiff) { best = c; bestDiff = diff; } }
+  // the club whose full swing finishes (carry + roll) nearest what's left
+  for (const c of CLUBS) { const diff = Math.abs(totalOf(playerDispersion(state, round, playerId, c)) - remaining); if (diff < bestDiff) { best = c; bestDiff = diff; } }
   return best;
 }
 /** Where the player intends the next shot to finish; recorded on that shot when it is logged. */

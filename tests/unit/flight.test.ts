@@ -40,3 +40,31 @@ describe("flight model", () => {
     expect(windLine(env, from, windy)).toMatch(/^15 mph right to left moves it about \d+ yards, so the aim is \d+ right and the wind brings it back\.$/);
   });
 });
+
+describe("roll-out", () => {
+  it("runs on after landing, less in rough, and can run into a bunker", async () => {
+    const { finishShot } = await import("../../prototype/flight");
+    const { buildHole, lieAt } = await import("../../prototype/holeGeometry");
+    const hole = buildHole(1, 4, 400);
+    const from = { u: 0, v: 0 };
+    // land on the fairway centre line, roll 20
+    const fw = hole.line[Math.floor(hole.line.length / 2)];
+    const r = finishShot(CALM, hole, from, fw, fw, 20);
+    expect(lieAt(hole, r.land)).toBe(r.landLie);
+    if (r.landLie === "fairway") expect(Math.hypot(r.rest.u - r.land.u, r.rest.v - r.land.v)).toBeGreaterThan(9);
+    // firm turf rolls farther than soft
+    const firm = finishShot({ ...CALM, rollFactor: 1.5 }, hole, from, fw, fw, 20), soft = finishShot({ ...CALM, rollFactor: 0.5 }, hole, from, fw, fw, 20);
+    expect(Math.hypot(firm.rest.u - firm.land.u, firm.rest.v - firm.land.v)).toBeGreaterThan(Math.hypot(soft.rest.u - soft.land.u, soft.rest.v - soft.land.v));
+    // a ball landing just short of a bunker on its line runs into it
+    const b = hole.bunkers[0];
+    const dir = { u: b.c.u / Math.hypot(b.c.u, b.c.v), v: b.c.v / Math.hypot(b.c.u, b.c.v) };
+    const short = { u: b.c.u - dir.u * (b.ru + 6), v: b.c.v - dir.v * (b.ru + 6) };
+    if (lieAt(hole, short) !== "sand" && lieAt(hole, short) !== "water") {
+      const into = finishShot(CALM, hole, from, short, short, 2 * (b.ru + 6));
+      expect(into.lie).toBe("sand");
+    }
+    // sand stops it dead
+    const inSand = finishShot(CALM, hole, from, b.c, b.c, 20);
+    expect(inSand.rest).toEqual(inSand.land);
+  });
+});

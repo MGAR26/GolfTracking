@@ -600,7 +600,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const mySg = me ? holeStrokesGained(myShots, shapeNow.green.c, hole.par, me.handicapIndex, sgBaseline(state)) : null;
   const strategyCurrent = useMemo(() => {
     if (!me || !dispersion) return null;
-    const aim = aimNow ?? aimFor(ballNow, shapeNow.green.c, dispersion.carry, 0);
+    const aim = aimNow ?? aimFor(ballNow, shapeNow.green.c, dispersion.carry + dispersion.roll, 0);
     const len = Math.hypot(shapeNow.green.c.u - ballNow.u, shapeNow.green.c.v - ballNow.v) || 1;
     const off = ((aim.u - ballNow.u) * -(shapeNow.green.c.v - ballNow.v) + (aim.v - ballNow.v) * (shapeNow.green.c.u - ballNow.u)) / len;
     return simulate(dispersion, ballNow, aim, shapeNow.green.c, shapeNow, me.handicapIndex, 500, Math.round(off), env, !!aimNow);

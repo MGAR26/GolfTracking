@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultProfile, dispersionModel, dispersionOutline, ellipseScale, expectedLanding, sampleShot, reachAlong, TRUSTED_DISTANCE_SHOTS } from "../../prototype/bag";
+import { defaultProfile, dispersionModel, dispersionOutline, ellipseScale, expectedLanding, sampleShot, reachAlong, TRUSTED_DISTANCE_SHOTS, totalOf, expectedFinish } from "../../prototype/bag";
 import type { Shot } from "../../prototype/shots";
 
 const aimed = (n: number, lateral: number, long: number): Shot[] =>
@@ -52,15 +52,44 @@ describe("landing zone follows the aim until the club is learned", () => {
   it("centres on an explicit aim with few shots, on the club's distance without an aim", () => {
     const m = dispersionModel("Dr", {}, 5, [], "p");
     expect(reachAlong(m, 320, true)).toBe(320);
-    expect(reachAlong(m, 320, false)).toBeCloseTo(m.carry);
-    expect(expectedLanding(m, from, far, true).u).toBeCloseTo(320);
-    expect(expectedLanding(m, from, far).u).toBeCloseTo(m.carry);
+    expect(reachAlong(m, 320, false)).toBeCloseTo(totalOf(m)); // carry + roll
+    expect(expectedFinish(m, from, far, true).u).toBeCloseTo(320);
+    expect(expectedLanding(m, from, far).u).toBeCloseTo(m.carry); // comes down at carry, then rolls
   });
   it("caps at the measured distance once there are enough aimed shots", () => {
     const shots = Array.from({ length: TRUSTED_DISTANCE_SHOTS }, (_, i) => ({ id: `s${i}`, playerId: "p", holeNumber: 1, seq: 1, club: "Dr" as const, from, to: { u: 262, v: 0 }, distance: 262, shape: null, trajectory: null, lie: "fairway" as const, aim: { u: 262, v: 0 } }));
     const m = dispersionModel("Dr", {}, 5, shots, "p");
     expect(m.samples).toBe(TRUSTED_DISTANCE_SHOTS);
-    expect(reachAlong(m, 320, true)).toBeCloseTo(m.carry);
-    expect(m.carry).toBeGreaterThan(255);
+    expect(reachAlong(m, 320, true)).toBeCloseTo(totalOf(m));
+    expect(totalOf(m)).toBeGreaterThan(255); // finished ~262: carry + roll, not carry, matches it
+  });
+});
+
+describe("carry and roll", () => {
+  const from = { u: 0, v: 0 };
+  const shot = (i: number, distance: number, aimAt: number | null) => ({ id: `x${i}`, playerId: "p", holeNumber: 1, seq: 2, club: "6i" as const, from, to: { u: distance, v: 0 }, distance, shape: null, trajectory: null, lie: "green" as const, aim: aimAt === null ? null : { u: aimAt, v: 0 } });
+  const bag = { "6i": { carry: 210, miss: "straight" as const, width: "narrow" as const } };
+  it("shows an entered carry exactly as typed, with default roll on top", () => {
+    const m = dispersionModel("6i", bag, 5, [], "p");
+    expect(m.carry).toBe(210);
+    expect(m.roll).toBe(5);
+    expect(m.distanceSource).toBe("entered");
+  });
+  it("a partial shot into a green does not pull the carry down", () => {
+    const m = dispersionModel("6i", bag, 5, [shot(1, 161, 161)], "p"); // aimed 161 with a 215-yard club: partial
+    expect(m.carry).toBe(210);
+    expect(m.fullShots).toBe(0);
+  });
+  it("full swings only nudge an entered carry after five, measured as finish minus roll", () => {
+    const four = Array.from({ length: 4 }, (_, i) => shot(i, 225, 215));
+    expect(dispersionModel("6i", bag, 5, four, "p").carry).toBe(210);
+    const six = Array.from({ length: 6 }, (_, i) => shot(i, 225, 215));
+    const m = dispersionModel("6i", bag, 5, six, "p");
+    expect(m.distanceSource).toBe("entered+shots");
+    expect(m.carry).toBeGreaterThan(210); expect(m.carry).toBeLessThan(220); // 6/16 of the way to 220
+  });
+  it("roll can be set per club", () => {
+    expect(dispersionModel("Dr", { Dr: { carry: 260, roll: 30, miss: "straight", width: "normal" } }, 5, [], "p").roll).toBe(30);
+    expect(totalOf(dispersionModel("Dr", {}, 5, [], "p"))).toBe(dispersionModel("Dr", {}, 5, [], "p").carry + 20);
   });
 });

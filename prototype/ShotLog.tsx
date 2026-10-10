@@ -5,7 +5,7 @@ import type { SgShot, SgTotals } from "../src/domain/strategy/strokesGained";
 import { Card } from "./ui";
 import { CLUBS, missFromAim, type Club, type Shape, type Shot, type Trajectory, type Lie } from "./shots";
 import { dist, type Pt } from "./holeGeometry";
-import { defaultProfile, dispersionModel, type Bag, type ClubProfile, type DispersionModel, type MissBias, type MissWidth, TRUSTED_DISTANCE_SHOTS } from "./bag";
+import { defaultProfile, dispersionModel, FULL_SHOTS_TO_NUDGE, rollOf, type Bag, type ClubProfile, type DispersionModel, type MissBias, type MissWidth, TRUSTED_DISTANCE_SHOTS } from "./bag";
 import { describeAim, type Outcome, type Play, type Simulation, type Strategy } from "./strategy";
 
 const clubLabel = (c: Shot["club"]) => (c === "chip" ? "Chip" : c === "putt" ? "Putt" : c === "Dr" ? "Driver" : c);
@@ -69,7 +69,7 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
               </div>
               {dispersion && club !== "chip" && club !== "putt" && (
                 <p className="text-[11px] text-ink-2" data-testid="dispersion-line">
-                  Your {clubLabel(club)}: carries {Math.round(dispersion.carry)}{Math.abs(dispersion.center.lateral) >= 2 ? `, tends ${Math.round(Math.abs(dispersion.center.lateral))} ${dispersion.center.lateral > 0 ? "right" : "left"}` : ", straight"}, 8 in 10 inside ±{Math.round(dispersion.sdLateral * 1.8)} yds
+                  Your {clubLabel(club)}: carries {Math.round(dispersion.carry)}{dispersion.roll >= 1 ? ` + ${Math.round(dispersion.roll)} roll` : ""}{Math.abs(dispersion.center.lateral) >= 2 ? `, tends ${Math.round(Math.abs(dispersion.center.lateral))} ${dispersion.center.lateral > 0 ? "right" : "left"}` : ", straight"}, 8 in 10 inside ±{Math.round(dispersion.sdLateral * 1.8)} yds
                   <span className="text-muted"> · {dispersion.samples ? `${dispersion.samples} aimed shot${dispersion.samples === 1 ? "" : "s"}` : "from your bag profile"}</span>
                   {aim && dispersion.samples < TRUSTED_DISTANCE_SHOTS && <span className="block text-muted" data-testid="follows-aim">The circle goes where you aim until it has learned your {clubLabel(club)} ({TRUSTED_DISTANCE_SHOTS - dispersion.samples} more aimed shot{TRUSTED_DISTANCE_SHOTS - dispersion.samples === 1 ? "" : "s"}).</span>}
                 </p>
@@ -292,11 +292,11 @@ export function BagCard({ shots, playerId, playerName, bag, handicapIndex, onPro
           const m = models[c];
           const setByYou = !!bag[c];
           return (
-            <button key={c} type="button" onClick={() => setOpen(open === c ? null : c)} aria-pressed={open === c} className={`rounded-lg py-1.5 ${open === c ? "ring-2 ring-brass" : ""} ${m.samples ? "bg-brass-soft" : setByYou ? "bg-surface-2" : "bg-surface-2/60"}`} data-testid={`bag-${c}`}>
+            <button key={c} type="button" onClick={() => setOpen(open === c ? null : c)} aria-pressed={open === c} className={`rounded-lg py-1.5 ${open === c ? "ring-2 ring-brass" : ""} ${m.distanceSource === "shots" || m.distanceSource === "entered+shots" || m.samples ? "bg-brass-soft" : setByYou ? "bg-surface-2" : "bg-surface-2/60"}`} data-testid={`bag-${c}`}>
               <p className="text-[10px] uppercase tracking-wide text-muted">{clubLabel(c)}</p>
               <p className="font-display text-lg leading-tight">{Math.round(m.carry)}</p>
-              <p className="text-[9px] text-ink-2">{missWord(m)} · ±{Math.round(m.sdLateral * 1.8)}</p>
-              <p className="text-[9px] text-muted">{m.samples ? `${m.samples} shot${m.samples === 1 ? "" : "s"}` : setByYou ? "set by you" : "estimate"}</p>
+              <p className="text-[9px] text-ink-2">{m.roll ? `+${Math.round(m.roll)} roll · ` : ""}{missWord(m)}</p>
+              <p className="text-[9px] text-muted" data-testid="bag-source">{m.distanceSource === "entered" ? "set by you" : m.distanceSource === "entered+shots" ? `you + ${m.fullShots} full` : m.distanceSource === "shots" ? `${m.fullShots} full swing${m.fullShots === 1 ? "" : "s"}` : "estimate"}</p>
             </button>
           );
         })}
@@ -316,13 +316,22 @@ export function BagCard({ shots, playerId, playerName, bag, handicapIndex, onPro
               <button type="button" className="tap !min-h-8 !min-w-8 rounded-md bg-surface border border-line-strong text-sm font-bold" aria-label="5 yards longer" onClick={() => set(open, { carry: prof.carry + 5 })}>+5</button>
               <span className="text-xs text-muted">yds</span>
             </label>
+            <label className="flex items-center gap-2"><span className="w-20 text-muted text-xs">Roll</span>
+              <button type="button" className="tap !min-h-8 !min-w-8 rounded-md bg-surface border border-line-strong text-sm font-bold" aria-label="2 yards less roll" onClick={() => set(open, { roll: Math.max(0, rollOf(open, prof) - 2) })}>−2</button>
+              <input className="field !min-h-8 w-20 !px-2 text-center" inputMode="numeric" aria-label={`${clubLabel(open)} roll`} value={rollOf(open, prof)} onChange={(e) => { const v = e.target.value.replace(/\D/g, ""); set(open, { roll: v === "" ? 0 : Math.min(60, Number(v)) }); }} data-testid="roll-input" />
+              <button type="button" className="tap !min-h-8 !min-w-8 rounded-md bg-surface border border-line-strong text-sm font-bold" aria-label="2 yards more roll" onClick={() => set(open, { roll: rollOf(open, prof) + 2 })}>+2</button>
+              <span className="text-xs text-muted">yds · total {prof.carry + rollOf(open, prof)}</span>
+            </label>
             <div><span className="label">Usual miss</span><div className="seg">{(["left", "straight", "right", "two-way"] as MissBias[]).map((v) => <button key={v} type="button" aria-pressed={prof.miss === v} onClick={() => set(open, { miss: v })} className="!text-xs !min-h-8">{v}</button>)}</div></div>
             <div><span className="label">How wide</span><div className="seg">{(["narrow", "normal", "wide"] as MissWidth[]).map((v) => <button key={v} type="button" aria-pressed={prof.width === v} onClick={() => set(open, { width: v })} className="!text-xs !min-h-8">{v}</button>)}</div></div>
-            <p className="text-[11px] text-muted">Model: carries {Math.round(m.carry)}, {missWord(m)}, 8 in 10 shots inside ±{Math.round(m.sdLateral * 1.8)} yds and {Math.round(m.sdLong * 1.8)} long/short. Your aimed shots refine this over time.{bag[open] && <> <button type="button" className="text-accent font-semibold" onClick={() => { onProfile(open, null); }}>Reset to estimate</button></>}</p>
+            <p className="text-[11px] text-muted" data-testid="bag-model">
+              Carries {Math.round(m.carry)} and rolls {Math.round(m.roll)} on fairway, finishing about {Math.round(m.carry + m.roll)}; firm turf runs farther, rough and soft turf stop it sooner, bunkers and water stop it. {missWord(m).charAt(0).toUpperCase() + missWord(m).slice(1)}, 8 in 10 shots inside ±{Math.round(m.sdLateral * 1.8)} yds and {Math.round(m.sdLong * 1.8)} long/short.{" "}
+              {m.distanceSource === "entered" ? `Your carry is used exactly as typed${m.fullShots ? `; ${m.fullShots} of ${FULL_SHOTS_TO_NUDGE} full swings logged before your tracked shots start to nudge it` : ` until you've logged ${FULL_SHOTS_TO_NUDGE} full swings`}. Partial shots never count.` : m.distanceSource === "entered+shots" ? `Your ${prof.carry} nudged by ${m.fullShots} full swings. Partial shots never count.` : "Your full swings refine this over time; partial shots never count."}
+              {bag[open] && <> <button type="button" className="text-accent font-semibold" onClick={() => { onProfile(open, null); }}>Reset to estimate</button></>}</p>
           </div>
         );
       })()}
-      <p className="mt-2 text-[11px] text-muted">Gold tiles are measured from aimed shots; grey are your entries or handicap-based estimates. These drive the club suggestion, the dispersion zone on the hole, and the lay-up numbers.</p>
+      <p className="mt-2 text-[11px] text-muted">Big number is carry; roll is added on top. Gold tiles use your tracked full swings; grey are your entries (used exactly as typed) or handicap-based estimates. These drive the club suggestion, the landing zone on the hole, and the plays.</p>
     </Card>
   );
 }

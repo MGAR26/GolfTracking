@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildHole, bunkerOutlines, compassName, DEFAULT_CONDITIONS, dist, elevationAt, ellipsePath, fairwayOutlines, greenDistances, greenOutline, greenSurface, hazardDistances, holeConditions, layupPoint, playsLike, slopeColor, snapToGreen, tiltWords, waterOutlines, type Conditions, type ElevationSample, type Ellipse, type HolePhoto, type HoleShape, type Pt, type Wind } from "./holeGeometry";
 import { missFromAim, type Shot } from "./shots";
-import { dispersionOutline, expectedLanding, type DispersionModel } from "./bag";
+import { dispersionOutline, expectedFinish, expectedLanding, type DispersionModel } from "./bag";
 import { applyFlight, type FlightEnv } from "./flight";
 
 /**
@@ -484,12 +484,15 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             const fly = (p: Pt) => (flight ? applyFlight(flight, pos, target, p) : p);
             const outer = polyPath(view, dispersionOutline(dispersion, pos, target, 0.8, 40, !!aim).map(fly));
             const inner = polyPath(view, dispersionOutline(dispersion, pos, target, 0.5, 40, !!aim).map(fly));
-            const landing = fly(expectedLanding(dispersion, pos, target, !!aim));
-            const e = view.project(landing);
+            // finish zone (after roll) plus where it comes down, joined by the run-out
+            const landing = fly(expectedFinish(dispersion, pos, target, !!aim));
+            const touchdown = fly(expectedLanding(dispersion, pos, target, !!aim));
+            const e = view.project(landing), t = view.project(touchdown);
             return (
               <g data-testid="dispersion" opacity={0.9}>
                 <path d={outer} fill="#b08d3c" fillOpacity={0.22} stroke="#f7f3ea" strokeWidth={1.2} strokeDasharray="3 2" />
                 <path d={inner} fill="#b08d3c" fillOpacity={0.22} stroke="#f7f3ea" strokeWidth={0.8} />
+                {ahead(touchdown) && dispersion.roll >= 3 && <><line x1={t.x} y1={t.y} x2={e.x} y2={e.y} stroke="#f7f3ea" strokeWidth={1} strokeDasharray="1.5 1.5" /><circle cx={t.x} cy={t.y} r={1.8} fill="none" stroke="#f7f3ea" strokeWidth={1} data-testid="touchdown" /></>}
                 {ahead(landing) && <circle cx={e.x} cy={e.y} r={2.2} fill="#f7f3ea" stroke="#b08d3c" strokeWidth={1} />}
               </g>
             );

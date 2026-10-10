@@ -3,9 +3,9 @@
  * outcome of each, and rank club + aim choices by expected strokes to hole out.
  */
 import { expectedStrokes } from "../src/domain/strategy/expectedStrokes";
-import { dist, lieAt, type HoleShape, type Pt } from "./holeGeometry";
-import { sampleShot, type DispersionModel } from "./bag";
-import { applyFlight, CALM, DRIFT_PER_MPH_PER_YD, windFor, type FlightEnv } from "./flight";
+import { dist, type HoleShape, type Pt } from "./holeGeometry";
+import { plannedRoll, reachAlong, sampleShot, totalOf, type DispersionModel } from "./bag";
+import { CALM, DRIFT_PER_MPH_PER_YD, finishShot, windFor, type FlightEnv } from "./flight";
 import { CLUBS, type Club } from "./shots";
 
 export type Outcome = "fairway" | "rough" | "sand" | "water" | "green";
@@ -40,9 +40,9 @@ export function simulate(model: DispersionModel, from: Pt, aim: Pt, flag: Pt, ho
   const counts: Record<Outcome, number> = { fairway: 0, rough: 0, sand: 0, water: 0, green: 0 };
   const next: number[] = [];
   let leaveSum = 0;
+  const roll = plannedRoll(model, reachAlong(model, dist(from, aim), followAim));
   for (let i = 0; i < n; i++) {
-    const to = applyFlight(env, from, aim, sampleShot(model, from, aim, i * 7919 + Math.round(aim.v * 13) + model.club.length, followAim));
-    const lie = lieAt(hole, to);
+    const { rest: to, lie } = finishShot(env, hole, from, aim, sampleShot(model, from, aim, i * 7919 + Math.round(aim.v * 13) + model.club.length, followAim), roll);
     const outcome: Outcome = lie === "tee" ? "fairway" : lie;
     counts[outcome]++;
     const d = dist(to, flag);
@@ -63,6 +63,7 @@ export function simulate(model: DispersionModel, from: Pt, aim: Pt, flag: Pt, ho
 }
 
 /** Aim `offset` yards right of the straight line at the club's carry (or at the flag if it reaches). */
+/** Aim point for a club: where it finishes (carry + roll), capped at the flag, `offset` yards right (+) or left. */
 export function aimFor(from: Pt, flag: Pt, carry: number, offset: number): Pt {
   const len = dist(from, flag) || 1;
   const f = { u: (flag.u - from.u) / len, v: (flag.v - from.v) / len }, r = { u: -f.v, v: f.u };
@@ -80,13 +81,13 @@ export function recommend(models: (club: Club) => DispersionModel, from: Pt, fla
     if (m.carry > remaining + 25) continue; // would fly the green
     if (m.carry < remaining * 0.35 && remaining > 60) continue; // pointless lay-up
     // Centre the aim fan on the wind correction for this club so the into-the-wind aim is tried exactly.
-    const drift = windFor(env, from, flag).cross * DRIFT_PER_MPH_PER_YD * Math.min(remaining, m.carry);
+    const drift = windFor(env, from, flag).cross * DRIFT_PER_MPH_PER_YD * Math.min(remaining, m.carry); // drift happens in the air: carry
     const offs = [...new Set(offsets.map((o) => Math.round(o - drift)))];
-    for (const off of offs) candidates.push(simulate(m, from, aimFor(from, flag, m.carry, off), flag, hole, handicapIndex, samples, off, env));
+    for (const off of offs) candidates.push(simulate(m, from, aimFor(from, flag, totalOf(m), off), flag, hole, handicapIndex, samples, off, env));
   }
   if (candidates.length === 0) {
     const m = models("PW");
-    candidates.push(simulate(m, from, aimFor(from, flag, m.carry, 0), flag, hole, handicapIndex, samples, 0, env));
+    candidates.push(simulate(m, from, aimFor(from, flag, totalOf(m), 0), flag, hole, handicapIndex, samples, 0, env));
   }
   const best = (r: number) => candidates.reduce((a, b) => (utility(b, r) < utility(a, r) ? b : a));
   // Three distinct plays: best expected score; the lowest-downside play near it; the highest-upside play near it.
