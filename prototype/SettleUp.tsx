@@ -53,39 +53,57 @@ export function SettleUpList({ payments, note, empty = "Everyone is even." }: { 
             </div>
             {isOpen && (
               <div className="mt-2 rounded-lg bg-surface-2/70 p-2.5 flex flex-col gap-2 text-sm" data-testid="venmo-panel">
-                {payee?.venmo ? (
+                {imOwed ? (
+                  /* You're owed: the payer's Venmo is what you need (to request it or find them). */
+                  payer?.venmo ? (
+                    <>
+                      <a href={venmoRequestUrl(payer.venmo, p.amountCents, note)} target="_blank" rel="noopener noreferrer" className="btn btn-primary !min-h-10 text-sm" data-testid="venmo-request">Request {money(p.amountCents)} from {name(p.fromPlayerId)}</a>
+                      <HandleRow label={`${name(p.fromPlayerId)}'s Venmo`} handle={payer.venmo} copied={copied} onCopy={doCopy} />
+                    </>
+                  ) : (
+                    <p className="text-ink-2" data-testid="venmo-missing">{name(p.fromPlayerId)} hasn&apos;t added a Venmo yet. Ask them to add it, or settle another way.</p>
+                  )
+                ) : payee?.venmo ? (
+                  /* You pay (or you're looking at someone else's line): the payee's Venmo. */
                   <>
-                    {!imOwed && (
-                      <a href={venmoPayUrl(payee.venmo, p.amountCents, note)} target="_blank" rel="noopener noreferrer" className={`btn ${iPay ? "btn-primary" : "btn-secondary"} !min-h-10 text-sm`} data-testid="venmo-pay">
-                        {iPay ? `Pay ${name(p.toPlayerId)} ${money(p.amountCents)} on Venmo` : `Open ${name(p.toPlayerId)} in Venmo`}
-                      </a>
-                    )}
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-ink-2">{imOwed ? "Your Venmo" : `${name(p.toPlayerId)}'s Venmo`} <b className="text-ink select-all" data-testid="venmo-handle">@{payee.venmo}</b></span>
-                      <button type="button" className="text-accent font-semibold text-xs" onClick={() => doCopy(`@${payee.venmo}`)} data-testid="venmo-copy">{copied === `@${payee.venmo}` ? "Copied" : "Copy"}</button>
-                    </div>
-                    {copied?.startsWith("select:") && <p className="text-xs text-muted">Copy isn&apos;t allowed here; press and hold the username to copy it.</p>}
+                    <a href={venmoPayUrl(payee.venmo, p.amountCents, note)} target="_blank" rel="noopener noreferrer" className={`btn ${iPay ? "btn-primary" : "btn-secondary"} !min-h-10 text-sm`} data-testid="venmo-pay">
+                      {iPay ? `Pay ${name(p.toPlayerId)} ${money(p.amountCents)} on Venmo` : `Open ${name(p.toPlayerId)} in Venmo`}
+                    </a>
+                    <HandleRow label={`${name(p.toPlayerId)}'s Venmo`} handle={payee.venmo} copied={copied} onCopy={doCopy} />
                   </>
                 ) : (
-                  <p className="text-ink-2" data-testid="venmo-missing">{imOwed ? "Add your Venmo so they can pay you in one tap." : `${name(p.toPlayerId)} hasn't added a Venmo yet. Ask them to add it, or settle another way.`}</p>
+                  <p className="text-ink-2" data-testid="venmo-missing">{name(p.toPlayerId)} hasn&apos;t added a Venmo yet. Ask them to add it, or settle another way.</p>
                 )}
-                {imOwed && payer?.venmo && (
-                  <a href={venmoRequestUrl(payer.venmo, p.amountCents, note)} target="_blank" rel="noopener noreferrer" className="btn btn-secondary !min-h-10 text-sm" data-testid="venmo-request">Request {money(p.amountCents)} from {name(p.fromPlayerId)}</a>
-                )}
-                {imOwed && !payee?.venmo && (
+                {copied?.startsWith("select:") && <p className="text-xs text-muted">Copy isn&apos;t allowed here; press and hold the username to copy it.</p>}
+                {imOwed && (payee?.venmo ? (
+                  <p className="text-xs text-muted flex items-center justify-between gap-2" data-testid="own-venmo">
+                    <span>Your Venmo <span className="select-all">@{payee.venmo}</span></span>
+                    <button type="button" className="text-accent font-semibold" onClick={() => doCopy(`@${payee.venmo}`)}>{copied === `@${payee.venmo}` ? "Copied" : "Copy yours"}</button>
+                  </p>
+                ) : (
                   <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); setError(null); const err = mutate((s) => setVenmo(s, s.actorId, draft)); if (err) setError(err); }}>
-                    <input className="field !min-h-10 flex-1" placeholder="@your-venmo" value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Your Venmo username" autoCapitalize="none" autoCorrect="off" />
+                    <input className="field !min-h-10 flex-1" placeholder="Add your @venmo so people can pay you" value={draft} onChange={(e) => setDraft(e.target.value)} aria-label="Your Venmo username" autoCapitalize="none" autoCorrect="off" />
                     <button type="submit" className="btn btn-primary !min-h-10 text-sm">Save</button>
                   </form>
-                )}
+                ))}
                 {error && <p className="text-xs text-neg">{error}</p>}
-                <p className="text-[11px] text-muted">Venmo opens with the amount and &ldquo;{note}&rdquo; filled in. You confirm the payment in Venmo; the app never moves money.</p>
+                <p className="text-[11px] text-muted">Venmo opens with the amount and &ldquo;{note}&rdquo; filled in. You confirm it in Venmo; the app never moves money.</p>
               </div>
             )}
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/** Someone's Venmo username with a Copy button. */
+function HandleRow({ label, handle, copied, onCopy }: { label: string; handle: string; copied: string | null; onCopy: (h: string) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-ink-2">{label} <b className="text-ink select-all" data-testid="venmo-handle">@{handle}</b></span>
+      <button type="button" className="btn btn-secondary !min-h-8 px-3 text-xs" onClick={() => onCopy(`@${handle}`)} data-testid="venmo-copy">{copied === `@${handle}` ? "Copied" : "Copy"}</button>
+    </div>
   );
 }
 
