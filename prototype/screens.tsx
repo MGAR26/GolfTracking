@@ -671,7 +671,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
     : holed ? `Holed out in ${myShots.length}`
     : onGreen ? `${Math.round(remainingNow * 3)} ft${puttsSoFar ? ` · putt ${puttsSoFar + 1}` : " for it"}`
     : advice?.headline ?? `${clubName}, ${Math.round(remainingNow)} to the middle.`;
-  const subline = !canTrack ? "" : holed ? "Nice. On to the next." : onGreen ? "Holed, or how far is left?" : aimNow ? `${clubName} · target ${Math.round(dist(ballNow, aimNow))}` : `${clubName} · ${Math.round(remainingNow)} to the middle`;
+  const subline = !canTrack ? "" : holed ? "Nice. On to the next." : onGreen ? "Holed, or how far is left?" : aimNow ? `${clubName} · target ${Math.round(dist(ballNow, aimNow))}${aimSol && Math.abs(aimSol.offset) >= 2 ? ` · start it ${Math.abs(aimSol.offset)} ${aimSol.offset > 0 ? "right" : "left"}` : ""}` : `${clubName} · ${Math.round(remainingNow)} to the middle`;
   const pickTab = (t: "score" | "money" | "stats") => nav({ name: "round", roundId, tab: t });
 
   return (

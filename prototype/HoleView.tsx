@@ -461,8 +461,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             return hazards.flatMap((h, hi) => {
               const color = h.kind === "water" ? "#9fd0f0" : h.kind === "bunker" ? "#f1e2a6" : "#b7e29a";
               const out = h.side === "L" ? -1 : 1; // push labels away from the line of play
-              // one number for trees, thin hazards, or anything past a full shot; front and carry when depth matters
-              const twoNumbers = h.kind !== "trees" && h.carry - h.to >= 12 && h.to <= 260;
+              // trees get one number; a trap or water gets its front and its back
+              const twoNumbers = h.kind !== "trees" && h.carry - h.to >= 4;
               const pts = twoNumbers ? [{ p: h.at, n: h.to, dy: 9 }, { p: h.farAt, n: h.carry, dy: -9 }] : [{ p: h.at, n: h.to, dy: 0 }];
               return pts.filter(({ p }) => ahead(p)).map(({ p, n, dy }, k) => {
                 const q = view.project(p);
@@ -538,7 +538,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
                 <path d={linePath(view, pos, aimLine.at)} stroke="#f7f3ea" strokeWidth={1} strokeDasharray="1 3" fill="none" opacity={0.9} />
                 <circle cx={q.x} cy={q.y} r={5} fill="none" stroke="#b08d3c" strokeWidth={1.6} />
                 <circle cx={q.x} cy={q.y} r={1.4} fill="#b08d3c" />
-                {aimHint && <text x={q.x} y={q.y - 9} textAnchor="middle" {...label} fill="#e9cf8f" data-testid="aim-hint">start here</text>}
+                {aimHint && <text x={q.x} y={q.y - 9} textAnchor="middle" {...label} fill="#e9cf8f" data-testid="aim-hint">start</text>}
               </g>
             );
           })()}
@@ -549,8 +549,8 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <circle cx={aimPt.x} cy={aimPt.y} r={2} fill="#f7f3ea" />
               <line x1={aimPt.x - 13} y1={aimPt.y} x2={aimPt.x - 5} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x + 5} y1={aimPt.y} x2={aimPt.x + 13} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} />
               <line x1={aimPt.x} y1={aimPt.y - 13} x2={aimPt.x} y2={aimPt.y - 5} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x} y1={aimPt.y + 5} x2={aimPt.x} y2={aimPt.y + 13} stroke="#f7f3ea" strokeWidth={1.2} />
-              <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>target {Math.round(aimDist ?? 0)}{toTarget ? ` · plays ${Math.round(pl.playsLike)}` : ""}</text>
-              {aimLine && Math.abs(aimLine.offset) >= 2 && <text x={aimPt.x + 15} y={aimPt.y + 13} {...label} fill="#e9cf8f" data-testid="aim-offset">start it {Math.abs(aimLine.offset)} {aimLine.offset > 0 ? "right" : "left"}</text>}
+              {!play && <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>target {Math.round(aimDist ?? 0)}{toTarget ? ` · plays ${Math.round(pl.playsLike)}` : ""}</text>}
+              {!play && aimLine && Math.abs(aimLine.offset) >= 2 && <text x={aimPt.x + 15} y={aimPt.y + 13} {...label} fill="#e9cf8f" data-testid="aim-offset">start it {Math.abs(aimLine.offset)} {aimLine.offset > 0 ? "right" : "left"}</text>}
               <circle cx={aimPt.x} cy={aimPt.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("aim")} data-testid="aim-handle" aria-label="Drag aim point" />
             </g>
           )}
