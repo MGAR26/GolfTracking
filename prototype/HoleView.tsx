@@ -12,10 +12,12 @@ import { applyFlight, type FlightEnv } from "./flight";
  * from GPS; here the layout is drawn from hole geometry and you tap to move.
  */
 const W = 400, H = 300, CX = 200;
+/** Portrait frame for the full-screen Play layout (the sheet covers the bottom of the phone). */
+export const H_PLAY = 700;
 // "You" sit near the bottom of the frame and the flag lands near the top, whatever is left to play.
 // Inside 250 yards the camera climbs (further back, horizon further above the frame) so the green
 // has real depth on screen and an aim point can be placed accurately.
-const NEAR_Y = 286, FLAG_Y = 74;
+// (flag and ball frame positions are derived from the frame height inside makeView)
 
 interface View {
   toView: (p: Pt) => Pt;
@@ -29,6 +31,8 @@ interface View {
   overhead: boolean;
   /** Pixels per yard for the overhead views (undefined in perspective). */
   scale?: number;
+  /** Frame height the view was built for. */
+  h: number;
 }
 /** Camera presets: follow the ball (today's view), the whole hole from above, or straight down over the green. */
 export type CameraPreset = "ball" | "hole" | "green";
@@ -36,13 +40,18 @@ export type CameraPreset = "ball" | "hole" | "green";
 const GREEN_VIEW_YDS = 40;
 
 /** Camera behind `pos`, facing `flag`; zoom scales with the remaining distance. */
-function makeView(pos: Pt, flag: Pt, green: Ellipse): View {
+function makeView(pos: Pt, flag: Pt, green: Ellipse, h = H): View {
+  // where the flag and the ball sit in the frame: a quarter down and just above the bottom edge
+  // the portrait Play frame puts the flag between the two corner blocks, so the hole fills the screen
+  // In the Play frame the ball sits clear of the pull-up sheet, and the flag between the two corner blocks.
+  const playFrame = h !== H;
+  const FLAG_Y = Math.round(h * (playFrame ? 0.17 : 74 / 300)), NEAR_Y = h - (playFrame ? 64 : 14);
   const d0 = dist(pos, flag);
   const D = Math.max(15, d0);
   // forward: from you to the flag; straight up the hole when you're on top of it
   const fu = d0 > 1 ? (flag.u - pos.u) / d0 : 1, fv = d0 > 1 ? (flag.v - pos.v) / d0 : 0;
   const ru = -fv, rv = fu; // right of the line of play
-  if (d0 <= GREEN_VIEW_YDS) return overheadView(pos, green, fu, fv);
+  if (d0 <= GREEN_VIEW_YDS) return overheadView(pos, green, fu, fv, true, h);
   // steeper (more overhead) the closer you are: ratio of camera set-back to shot length
   const t = Math.min(1, Math.max(0, (D - 100) / 250)); // 0 inside 100 yds … 1 at 350+
   const back = 3.5 - 1.5 * t; // 3.5× inside 100 yds → 2× on long holes
@@ -62,46 +71,47 @@ function makeView(pos: Pt, flag: Pt, green: Ellipse): View {
     const vu = depth - camBack, vv = ((x - CX) * depth) / F;
     return { u: pos.u + vu * fu + vv * ru, v: pos.v + vu * fv + vv * rv };
   };
-  return { toView, project, projectView, unproject, near: -camBack + 8, horizon: HORIZON, overhead: false };
+  return { toView, project, projectView, unproject, near: -camBack + 8, horizon: HORIZON, overhead: false, h };
 }
 /** Straight down over the green, rotated so the line from you to the flag points up the screen. */
-function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number, includeBall = true): View {
+function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number, includeBall = true, h = H): View {
   const ru = -fv, rv = fu;
   const toView = (p: Pt): Pt => { const du = p.u - green.c.u, dv = p.v - green.c.v; return { u: du * fu + dv * fv, v: du * ru + dv * rv }; };
   // Fit the whole green AND the ball: zoom out until both sit between the top and bottom overlays.
   const maxR = Math.max(green.ru, green.rv);
   const ballU = includeBall ? toView(pos).u : -maxR; // negative: behind the green centre along the line of play
   const high = maxR + 4, low = Math.min(ballU, -maxR) - 4;
-  const TOP = 34, BOTTOM = H - 34;
-  const s = Math.min((H * 0.62) / (2 * maxR), (BOTTOM - TOP) / (high - low)); // px per yard
+  const TOP = h === H ? 34 : 120, BOTTOM = h - 34;
+  const s = Math.min(((BOTTOM - TOP) * 0.8) / (2 * maxR), (BOTTOM - TOP) / (high - low)); // px per yard
   const CY = (TOP + BOTTOM) / 2 + ((high + low) / 2) * s; // centre the span green-edge → ball
   const projectView = (q: Pt) => ({ x: CX + q.v * s, y: CY - q.u * s, s });
   const project = (p: Pt) => projectView(toView(p));
   const unproject = (x: number, y: number): Pt => { const vu = (CY - y) / s, vv = (x - CX) / s; return { u: green.c.u + vu * fu + vv * ru, v: green.c.v + vu * fv + vv * rv }; };
-  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true, scale: s };
+  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true, scale: s, h };
 }
 /** The whole hole from above, tee at the bottom and the green at the top. */
 /** Picture height for the whole-hole preset: portrait, like a yardage book page. */
 const H_HOLE = 520;
-function wholeHoleView(hole: HoleShape): View {
+function wholeHoleView(hole: HoleShape, h = H_HOLE, top = 96): View {
   const g = hole.green.c;
   const L = Math.hypot(g.u, g.v) || 1;
   const fu = g.u / L, fv = g.v / L, ru = -fv, rv = fu; // up the screen = tee → green centre
   const toView = (p: Pt): Pt => ({ u: p.u * fu + p.v * fv, v: p.u * ru + p.v * rv });
-  const TOP = 96, BOTTOM = H_HOLE - 28; // below the hole label and camera chips
+  const TOP = top, BOTTOM = h - 28; // below the hole label and camera chips
   const low = -12, high = L + Math.max(hole.green.ru, hole.green.rv) + 8;
   const s = Math.min((BOTTOM - TOP) / (high - low), 1.6);
   const CY = BOTTOM + low * s;
   const projectView = (q: Pt) => ({ x: CX + q.v * s, y: CY - q.u * s, s });
   const project = (p: Pt) => projectView(toView(p));
   const unproject = (x: number, y: number): Pt => { const vu = (CY - y) / s, vv = (x - CX) / s; return { u: vu * fu + vv * ru, v: vu * fv + vv * rv }; };
-  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true, scale: s };
+  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true, scale: s, h };
 }
-function presetView(preset: CameraPreset, camPos: Pt, hole: HoleShape): View {
+/** `play` is the Play frame's height in view units (0 for the card). */
+function presetView(preset: CameraPreset, camPos: Pt, hole: HoleShape, play = 0): View {
   const flag = hole.green.c;
-  if (preset === "hole") return wholeHoleView(hole);
-  if (preset === "green") { const d0 = dist(camPos, flag); const fu = d0 > 1 ? (flag.u - camPos.u) / d0 : 1, fv = d0 > 1 ? (flag.v - camPos.v) / d0 : 0; return overheadView(camPos, hole.green, fu, fv, false); }
-  return makeView(camPos, flag, hole.green);
+  if (preset === "hole") return play ? wholeHoleView(hole, play, Math.round(play * 0.2)) : wholeHoleView(hole);
+  if (preset === "green") { const d0 = dist(camPos, flag); const fu = d0 > 1 ? (flag.u - camPos.u) / d0 : 1, fv = d0 > 1 ? (flag.v - camPos.v) / d0 : 0; return overheadView(camPos, hole.green, fu, fv, false, play || H); }
+  return makeView(camPos, flag, hole.green, play || H);
 }
 /** Ease-in-out for the flyover. */
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
@@ -160,8 +170,8 @@ function SatelliteLayer({ photo, view, id, coarse = false }: { photo: HolePhoto;
   // Perspective: bands of constant screen height from the top of the frame down to the bottom.
   const BAND = coarse ? 10 : 5;
   const bands: { y0: number; y1: number; m: string }[] = [];
-  for (let y0 = 0; y0 < H; y0 += BAND) {
-    const y1 = Math.min(H, y0 + BAND), ym = (y0 + y1) / 2;
+  for (let y0 = 0; y0 < view.h; y0 += BAND) {
+    const y1 = Math.min(view.h, y0 + BAND), ym = (y0 + y1) / 2;
     const mid = view.unproject(CX, ym); // world point at the band's middle depth on the centre line
     const q = view.toView(mid);
     if (q.u < view.near) break;
@@ -230,12 +240,13 @@ export const TRAIL_COLORS = ["#e4572e", "#3a86ff", "#ffd166", "#c77dff", "#00b4d
 const fmtAdj = (n: number) => (Math.abs(n) < 0.5 ? "(±0)" : `(${n > 0 ? "+" : "−"}${Math.round(Math.abs(n))})`);
 const label = { fontSize: 8, fill: "#f7f3ea", fontWeight: 700, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.6)", strokeWidth: 2 } };
 
-export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange, satellite = true, onSatelliteChange, flight = null, aimLine = null }: {
+export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNumbersChange, wind, onWindChange, tracking, shots, onShot, onMoveShot, focusShot, others = [], aim, aimMode, onSetAim, onAimButton, shape, notes = [], dispersion = null, conditions, onConditionsChange, satellite = true, onSatelliteChange, flight = null, aimLine = null, layout = "card", onPrevHole, onNextHole, aimHint = false }: {
   holeNumber: number; par: number; yardage: number | null; strokeIndex: number; numbers: number[]; onNumbersChange: (n: number[]) => void; wind: Wind; onWindChange: (w: Wind) => void;
-  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void; /** Draw the baked satellite photo under the shapes (when the course has one). */ satellite?: boolean; onSatelliteChange?: (on: boolean) => void; /** Wind and ground for drawing where shots really land. */ flight?: FlightEnv | null; /** Where to start the shot so it finishes at the target (aim), and how far off the target line. */ aimLine?: { at: Pt; offset: number } | null;
+  tracking: boolean; shots: Shot[]; onShot: (to: Pt) => void; onMoveShot: (id: string, to: Pt, first: boolean) => void; focusShot?: Shot | null; others?: OtherTrail[]; aim: Pt | null; aimMode: boolean; onSetAim: (p: Pt) => void; onAimButton: () => void; /** Real outlines when a course is loaded. */ shape?: HoleShape; /** Side bets riding on this hole, shown as small notices on the picture. */ notes?: HoleNote[]; /** Where the selected club tends to finish, drawn on the hole while tracking. */ dispersion?: DispersionModel | null; conditions?: Partial<Conditions>; onConditionsChange?: (patch: Partial<Conditions>) => void; /** Draw the baked satellite photo under the shapes (when the course has one). */ satellite?: boolean; onSatelliteChange?: (on: boolean) => void; /** Wind and ground for drawing where shots really land. */ flight?: FlightEnv | null; /** Where to start the shot so it finishes at the target (aim), and how far off the target line. */ aimLine?: { at: Pt; offset: number } | null; /** "card" is the old boxed picture; "play" fills its container with small chrome in the corners. */ layout?: "card" | "play"; onPrevHole?: () => void; onNextHole?: () => void; /** Label the aim ring "start here" (first few times). */ aimHint?: boolean;
 }) {
   const [editNumbers, setEditNumbers] = useState(false);
   const [editWind, setEditWind] = useState(false);
+  const [camMenu, setCamMenu] = useState(false);
   const hole = useMemo(() => shape ?? buildHole(holeNumber, par, yardage), [shape, holeNumber, par, yardage]);
   const cond = useMemo(() => { const c = holeConditions(holeNumber, par); const e = hole.elevation; return { ...c, bearingDeg: hole.bearingDeg ?? c.bearingDeg, elevationFt: e ? Math.round(e[e.length - 1].ft - e[0].ft) : c.elevationFt }; }, [holeNumber, par, hole.bearingDeg, hole.elevation]);
   const [tapPos, setTapPos] = useState<Pt>({ u: 0, v: 0 });
@@ -264,8 +275,20 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   useEffect(() => () => { if (flyRef.current !== null) cancelAnimationFrame(flyRef.current); }, []);
   const flyPos: Pt | null = fly === null ? null : pointOnLine(hole, ease(fly) * Math.max(0, hole.length - 20));
   const camPos = flyPos ?? frozenPos ?? (focusShot ? focusShot.from : pos);
-  const view = flyPos ? makeView(camPos, flag, hole.green) : presetView(preset, camPos, hole); // cheap: a few closures
-  const VH = !flyPos && preset === "hole" ? H_HOLE : H; // the whole-hole preset gets a portrait picture
+  const play = layout === "play";
+  // The Play frame fills the screen with no cropping: its height in view units follows the container's shape.
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [playH, setPlayH] = useState(H_PLAY);
+  useEffect(() => {
+    if (!play || !frameRef.current || typeof ResizeObserver === "undefined") return;
+    const el = frameRef.current;
+    const measure = () => { const r = el.getBoundingClientRect(); if (r.width > 0) setPlayH(Math.max(400, Math.round((W * r.height) / r.width))); };
+    measure();
+    const ro = new ResizeObserver(measure); ro.observe(el);
+    return () => ro.disconnect();
+  }, [play]);
+  const view = flyPos ? makeView(camPos, flag, hole.green, play ? playH : H) : presetView(preset, camPos, hole, play ? playH : 0); // cheap: a few closures
+  const VH = view.h; // portrait for the Play layout and the whole-hole preset
   const surface = useMemo(() => greenSurface(holeNumber, hole.green, cond.tilt, hole.greenOutline), [holeNumber, hole.green, cond.tilt, hole.greenOutline]);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ kind: "aim" | "shot" | "you"; id?: string; moved: boolean } | null>(null);
@@ -383,9 +406,9 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
   const aimDist = aim ? dist(pos, aim) : null;
 
   return (
-    <div className="card overflow-hidden !p-0" data-testid="hole-view">
-      <div className="relative">
-        <svg viewBox={`0 0 ${W} ${VH}`} className={`block w-full h-auto select-none ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} onPointerDown={onPinchDown} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} ref={svgRef} style={{ touchAction: "pan-y" }} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
+    <div className={play ? "absolute inset-0" : "card overflow-hidden !p-0"} data-testid="hole-view" ref={frameRef}>
+      <div className={play ? "absolute inset-0" : "relative"}>
+        <svg viewBox={`0 0 ${W} ${VH}`} preserveAspectRatio={play ? "xMidYMid slice" : "xMidYMid meet"} className={`block select-none ${play ? "absolute inset-0 w-full h-full" : "w-full h-auto"} ${aimMode ? "cursor-cell" : "cursor-crosshair"}`} onClick={onTap} onPointerDown={onPinchDown} onPointerMove={onDragMove} onPointerUp={endDrag} onPointerCancel={endDrag} ref={svgRef} style={{ touchAction: "pan-y" }} role="img" aria-label={`Hole ${holeNumber} view from your position`}>
           <defs>
             <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#8aa66a" /><stop offset="100%" stopColor="#5f7f48" /></linearGradient>
             <linearGradient id="fw" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#a3c276" /><stop offset="100%" stopColor="#8fb463" /></linearGradient>
@@ -433,29 +456,45 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
             );
           }))}
           {/* hazard yardages: a number in the hazard's colour, set off to the side with a thin leader to the edge it measures */}
-          {(!view.overhead || (view.scale ?? 0) >= 1.5) && hazards.flatMap((h) => {
-            const color = h.kind === "water" ? "#9fd0f0" : h.kind === "bunker" ? "#f1e2a6" : "#b7e29a";
-            const out = h.side === "L" ? -1 : 1; // push labels away from the line of play
-            // one number for trees, thin hazards, or anything past a full shot; front and carry when depth matters
-            const twoNumbers = h.kind !== "trees" && h.carry - h.to >= 12 && h.to <= 260;
-            const pts = twoNumbers ? [{ p: h.at, n: h.to, dy: 9 }, { p: h.farAt, n: h.carry, dy: -9 }] : [{ p: h.at, n: h.to, dy: 0 }];
-            return pts.filter(({ p }) => ahead(p)).map(({ p, n, dy }, k) => {
-              const q = view.project(p);
-              let lx = q.x + out * 30, ly = q.y + dy;
-              const w = String(Math.round(n)).length * 5.6;
-              // keep clear of the top band (hole label, F/M/B) and the info column on the right
-              if (ly < 72) ly = 72;
-              const xmax = out > 0 ? lx + w : lx;
-              if (ly < 134 && xmax > 254) lx -= xmax - 254;
-              return (
-                <g key={`${h.kind}-${h.side}-${k}`} data-testid="hazard-label">
-                  <line x1={q.x} y1={q.y} x2={lx - out * 3} y2={ly} stroke={color} strokeWidth={0.8} opacity={0.9} />
-                  <circle cx={q.x} cy={q.y} r={1.4} fill={color} />
-                  <text x={lx} y={ly + 3} textAnchor={out < 0 ? "end" : "start"} fontSize={9} fontWeight={700} fill={color} style={{ paintOrder: "stroke", stroke: "rgba(27,42,65,0.75)", strokeWidth: 2.5 }}>{Math.round(n)}</text>
-                </g>
-              );
+          {(!view.overhead || (view.scale ?? 0) >= 1.5) && (() => {
+            const placed: { lx: number; ly: number; n: number }[] = [];
+            return hazards.flatMap((h, hi) => {
+              const color = h.kind === "water" ? "#9fd0f0" : h.kind === "bunker" ? "#f1e2a6" : "#b7e29a";
+              const out = h.side === "L" ? -1 : 1; // push labels away from the line of play
+              // one number for trees, thin hazards, or anything past a full shot; front and carry when depth matters
+              const twoNumbers = h.kind !== "trees" && h.carry - h.to >= 12 && h.to <= 260;
+              const pts = twoNumbers ? [{ p: h.at, n: h.to, dy: 9 }, { p: h.farAt, n: h.carry, dy: -9 }] : [{ p: h.at, n: h.to, dy: 0 }];
+              return pts.filter(({ p }) => ahead(p)).map(({ p, n, dy }, k) => {
+                const q = view.project(p);
+                if (q.y > VH - 4 || q.y < 0 || q.x < 0 || q.x > W) return null; // not on the picture
+                const w = String(Math.round(n)).length * 5.6;
+                let ly = q.y + dy;
+                // keep clear of the top band (hole label, F/M/B) and the info column on the right
+                if (ly < 72) ly = 72;
+                // the number sits off to the side of the hazard, flipped to the inside when it would leave the picture
+                const place = (o: number) => {
+                  let lx = q.x + o * 30;
+                  const xmax = o > 0 ? lx + w : lx;
+                  if (ly < 134 && xmax > 254) lx -= xmax - 254;
+                  const fits = lx - (o < 0 ? w : 0) >= 2 && lx + (o > 0 ? w : 0) <= W - 2;
+                  return { lx, o, fits };
+                };
+                const first = place(out), pick = first.fits ? first : place(-out);
+                if (!pick.fits) return null;
+                const lx = pick.lx, side = pick.o;
+                // the same number already sits next to this one (two traps sharing an edge): say it once
+                if (placed.some((d) => Math.round(d.n) === Math.round(n) && Math.abs(d.lx - lx) < 30 && Math.abs(d.ly - ly) < 28)) return null;
+                placed.push({ lx, ly, n });
+                return (
+                  <g key={`${hi}-${k}`} data-testid="hazard-label">
+                    <line x1={q.x} y1={q.y} x2={lx - side * 3} y2={ly} stroke={color} strokeWidth={0.8} opacity={0.9} />
+                    <circle cx={q.x} cy={q.y} r={1.4} fill={color} />
+                    <text x={lx} y={ly + 3} textAnchor={side < 0 ? "end" : "start"} fontSize={9} fontWeight={700} fill={color} style={{ paintOrder: "stroke", stroke: "rgba(27,42,65,0.75)", strokeWidth: 2.5 }}>{Math.round(n)}</text>
+                  </g>
+                );
+              });
             });
-          })}
+          })()}
           {/* logged shots, with their aim point and miss when one was set */}
           {shots.map((sh) => {
             const a = view.project(sh.from), b = view.project(sh.to);
@@ -499,6 +538,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
                 <path d={linePath(view, pos, aimLine.at)} stroke="#f7f3ea" strokeWidth={1} strokeDasharray="1 3" fill="none" opacity={0.9} />
                 <circle cx={q.x} cy={q.y} r={5} fill="none" stroke="#b08d3c" strokeWidth={1.6} />
                 <circle cx={q.x} cy={q.y} r={1.4} fill="#b08d3c" />
+                {aimHint && <text x={q.x} y={q.y - 9} textAnchor="middle" {...label} fill="#e9cf8f" data-testid="aim-hint">start here</text>}
               </g>
             );
           })()}
@@ -522,6 +562,72 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           </>}
           </g>
         </svg>
+        {play ? (
+          <>
+            {/* Play layout: small chrome in the corners, the hole is the screen */}
+            <div className="absolute top-2 left-3 flex items-start gap-1 text-[var(--bg)]" data-testid="play-hole">
+              <div className="leading-none">
+                <div className="flex items-end gap-1.5">
+                  {onPrevHole && <button type="button" onClick={onPrevHole} className="tap !min-h-8 !min-w-6 text-lg opacity-70 leading-none" aria-label="Previous hole">‹</button>}
+                  <span className="font-display text-[34px] leading-none" style={{ textShadow: "0 1px 6px rgba(27,42,65,.6)" }}>{holeNumber}</span>
+                  {onNextHole && <button type="button" onClick={onNextHole} className="tap !min-h-8 !min-w-6 text-lg opacity-70 leading-none" aria-label="Next hole">›</button>}
+                </div>
+                <div className="text-[9px] uppercase tracking-[.14em] opacity-85 mt-1" style={{ textShadow: "0 1px 4px rgba(27,42,65,.6)" }}>Par {par}{yardage ? ` · ${yardage}` : ""} · SI {strokeIndex}</div>
+              </div>
+            </div>
+            <div className="absolute top-2 right-3 flex flex-col items-end gap-1 text-[var(--bg)] text-right" data-testid="play-corner" style={{ textShadow: "0 1px 6px rgba(27,42,65,.6)" }}>
+              <div className="font-display text-[30px] leading-none" data-testid="dist-middle">{Math.round(d.middle)}</div>
+              <div className="text-[9px] uppercase tracking-[.12em] opacity-85 tabular-nums"><span data-testid="dist-front">F {Math.round(d.front)}</span> · <span data-testid="dist-back">B {Math.round(d.back)}</span></div>
+              <button type="button" onClick={() => setEditWind((e) => !e)} className="font-display text-[17px] leading-none mt-1" data-testid="plays-like" aria-expanded={editWind}><span className="font-sans text-[8px] uppercase tracking-[.12em] opacity-85 mr-1">Plays{toTarget ? " · target" : ""}</span>{Math.round(pl.playsLike)}</button>
+              <div className="flex gap-1 mt-0.5" style={{ textShadow: "none" }}>
+                <button type="button" onClick={() => setEditWind((e) => !e)} className="inline-flex items-center gap-1 h-5 px-2 rounded-full bg-ink/55 backdrop-blur text-[10px] font-semibold tabular-nums" aria-label={`Wind ${wind.mph} mph`} data-testid="wind-chip">
+                  <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden><g transform={`rotate(${windRel} 12 12)`}><path d="M12 3 L16 12 L12 10 L8 12 Z" fill="#b08d3c" /><line x1="12" y1="10" x2="12" y2="21" stroke="#b08d3c" strokeWidth="2.4" strokeLinecap="round" /></g></svg>{wind.mph}
+                </button>
+                <div className="inline-flex items-center gap-1 h-5 px-2 rounded-full bg-ink/55 backdrop-blur text-[10px] font-semibold tabular-nums" aria-label={`Green falls ${tiltWords(cond.tilt)}, ${cond.tilt.pct} percent`} data-testid="slope-chip">
+                  <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden><g transform={`rotate(${fallScreen} 12 12)`}><path d="M12 3 L16 12 L12 10 L8 12 Z" fill="#9cc873" /><line x1="12" y1="10" x2="12" y2="21" stroke="#9cc873" strokeWidth="2.4" strokeLinecap="round" /></g></svg>{cond.tilt.pct}%
+                </div>
+              </div>
+            </div>
+            {/* camera: one glyph, a small menu */}
+            <div className="absolute right-3 top-[132px] flex flex-col items-end gap-1">
+              <button type="button" onClick={() => setCamMenu((m) => !m)} className="h-8 w-8 rounded-full bg-ink/55 backdrop-blur text-[var(--bg)] grid place-items-center" aria-label="Camera" aria-expanded={camMenu} data-testid="camera-menu">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><path d="M4 8h3l2-3h6l2 3h3v10H4z" /><circle cx="12" cy="13" r="3.2" /></svg>
+              </button>
+              {camMenu && (
+                <div className="rounded-xl bg-ink/90 backdrop-blur text-[var(--bg)] p-1 flex flex-col text-[12px] font-semibold shadow-lg" role="menu">
+                  {(["ball", "hole", "green"] as const).map((p) => <button key={p} type="button" role="menuitemradio" aria-checked={preset === p && fly === null} onClick={() => { setPreset(p); setZoom({ k: 1, tx: 0, ty: 0 }); setCamMenu(false); }} className={`text-left px-3 py-1.5 rounded-lg capitalize ${preset === p && fly === null ? "bg-[var(--bg)] text-ink" : ""}`} data-testid={`camera-${p}`}>{p}</button>)}
+                  <button type="button" role="menuitem" onClick={() => { startFly(); setCamMenu(false); }} className="text-left px-3 py-1.5 rounded-lg" data-testid="camera-fly">Fly the hole</button>
+                  {hole.photo && <button type="button" role="menuitem" onClick={() => { onSatelliteChange?.(!satellite); setCamMenu(false); }} className="text-left px-3 py-1.5 rounded-lg" data-testid="satellite-toggle">{photo ? "Hide satellite" : "Show satellite"}</button>}
+                </div>
+              )}
+            </div>
+            {editWind && (
+              <div className="absolute right-3 top-[132px] w-[250px] rounded-xl bg-[var(--bg)]/95 backdrop-blur text-ink p-2.5 shadow-lg flex flex-col gap-2 text-[11px]" data-testid="conditions-panel">
+                <div className="flex items-center justify-between"><span className="label !mb-0">Conditions</span><button type="button" className="text-accent font-semibold" onClick={() => setEditWind(false)}>Done</button></div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1" data-testid="plays-like-breakdown">
+                  <span className="font-semibold text-ink">{toTarget ? `Target ${Math.round(pl.distance)} plays like ${Math.round(pl.playsLike)}` : `Plays like ${Math.round(pl.playsLike)} to the middle`}</span>
+                  {pl.factors.map((f) => <span key={f.key} className="text-ink-2">{f.label} {fmtAdj(f.yards)}</span>)}
+                  {Math.abs(pl.crosswindMph) >= 3 && <span className="text-ink-2">{Math.round(Math.abs(pl.crosswindMph))} mph across {pl.crosswindMph > 0 ? "L→R" : "R→L"}</span>}
+                  <span className={`font-semibold ${pl.confidence === "high" ? "text-brass" : pl.confidence === "medium" ? "text-ink-2" : "text-muted"}`} data-testid="plays-like-confidence">{pl.confidence} confidence</span>
+                </div>
+                {hole.elevation && <ElevationProfile profile={hole.elevation} pos={pos} flag={flag} length={hole.length} />}
+                <label className="flex items-center gap-2"><span className="w-12 text-muted">Wind</span><input type="range" min={0} max={30} value={wind.mph} onChange={(e) => onWindChange({ ...wind, mph: Number(e.target.value) })} className="flex-1 accent-[var(--accent)]" aria-label="Wind speed" /><span className="w-12 text-right font-semibold">{wind.mph} mph</span></label>
+                <div className="flex items-center gap-2"><span className="w-12 text-muted">From</span>
+                  <div className="seg flex-1">{["N", "NE", "E", "SE", "S", "SW", "W", "NW"].map((n, i) => <button key={n} type="button" aria-pressed={compassName(wind.fromDeg) === n} onClick={() => onWindChange({ ...wind, fromDeg: i * 45 })} className="!min-h-7 !text-[10px]">{n}</button>)}</div>
+                </div>
+                <div className="flex items-center gap-2"><span className="w-12 text-muted">Turf</span>
+                  <div className="seg flex-1">{(["soft", "normal", "firm"] as const).map((f) => <button key={f} type="button" aria-pressed={day.firmness === f} onClick={() => onConditionsChange?.({ firmness: f })} className="!min-h-7 !text-[10px]">{f}</button>)}</div>
+                </div>
+                <label className="flex items-center gap-2"><span className="w-12 text-muted">Temp</span><input type="range" min={35} max={105} value={day.tempF} onChange={(e) => onConditionsChange?.({ tempF: Number(e.target.value) })} className="flex-1 accent-[var(--accent)]" aria-label="Temperature" /><span className="w-12 text-right font-semibold">{day.tempF}°F</span></label>
+              </div>
+            )}
+            {aimMode && <div className="absolute bottom-3 left-3 pointer-events-none"><span className="rounded-full bg-[var(--bg)]/95 px-3 py-1.5 text-[11px] font-semibold text-ink shadow">Tap where you want it to finish</span></div>}
+            <button type="button" onClick={onAimButton} aria-pressed={aimMode} data-testid="aim-fab" className={`absolute bottom-3 right-3 h-11 w-11 rounded-full grid place-items-center shadow-lg ${aimMode ? "bg-brass text-ink" : "bg-[var(--bg)] text-ink"}`} aria-label={aimMode ? "Cancel target" : aim ? "Move target" : "Set target"}>
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="7" /><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></svg>
+            </button>
+          </>
+        ) : (
+          <>
         <div className="absolute left-2 top-[62px] flex items-center gap-1" data-testid="camera-presets" role="group" aria-label="Camera">
           {(["ball", "hole", "green"] as const).map((p) => (
             <button key={p} type="button" aria-pressed={preset === p && fly === null} onClick={() => { setPreset(p); setZoom({ k: 1, tx: 0, ty: 0 }); }} className={`rounded-full px-2 py-[3px] text-[10.5px] font-semibold capitalize ${preset === p && fly === null ? "bg-[var(--bg)] text-ink" : "bg-ink/70 text-[var(--bg)]"}`} data-testid={`camera-${p}`}>{p}</button>
@@ -580,7 +686,10 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="8" /><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" /><line x1="12" y1="1" x2="12" y2="5" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="1" y1="12" x2="5" y2="12" /><line x1="19" y1="12" x2="23" y2="12" /></svg>
           {aimMode ? "Cancel" : aim ? `Target ${Math.round(aimDist ?? 0)}${toTarget ? ` · plays ${Math.round(pl.playsLike)}` : ""}` : "Target"}
         </button>
+          </>
+        )}
       </div>
+      {!play && (
       <div className="px-3 py-2 border-t border-line flex flex-col gap-2">
         {hole.elevation && <ElevationProfile profile={hole.elevation} pos={pos} flag={flag} length={hole.length} />}
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="plays-like-breakdown">
@@ -638,6 +747,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           </p>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -223,13 +223,15 @@ export function hazardDistances(from: Pt, flag: Pt, hole: HoleShape, coneDeg = 2
   const dir = { u: (flag.u - from.u) / total, v: (flag.v - from.v) / total };
   const cos = Math.cos((coneDeg * Math.PI) / 180);
   const consider = (kind: HazardDistance["kind"], outline: Pt[]): HazardDistance | null => {
+    // Only the part of the hazard inside the cone counts: a big waste area's far-off edges are not in play.
     let to = Infinity, carry = 0, inCone = false, at: Pt = outline[0], farAt: Pt = outline[0];
     const centroid = outline.reduce((a, p) => ({ u: a.u + p.u / outline.length, v: a.v + p.v / outline.length }), { u: 0, v: 0 });
     for (const p of outline) {
       const d = dist(from, p);
       if (d < 5) continue;
       const along = ((p.u - from.u) * dir.u + (p.v - from.v) * dir.v) / d;
-      if (along > cos) inCone = true;
+      if (along <= cos) continue;
+      inCone = true;
       if (d < to) { to = d; at = p; }
       if (d > carry) { carry = d; farAt = p; }
     }

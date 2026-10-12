@@ -3,9 +3,11 @@ import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
 import { RoundReplay, replayableHoles } from "./Replay";
+import { Sheet, SheetTabs } from "./Sheet";
+import { clubWords } from "./caddie";
 import { SettleUpList, VenmoField } from "./SettleUp";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
-import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, holeFlightEnv, DEFAULT_WIND, roundSettlement, aimPlan, clubForTargetFor, bagTips, applyBagTip, dismissBagTip, playerShots, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, setTrackingOn, sgBaseline, trackingOn, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
+import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, holeFlightEnv, DEFAULT_WIND, roundSettlement, aimPlan, clubForTargetFor, showAimHint, noteAimHint, bagTips, applyBagTip, dismissBagTip, playerShots, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, setTrackingOn, sgBaseline, trackingOn, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
 import type { Shot } from "./shots";
 import { dist, hazardDistances } from "./holeGeometry";
@@ -408,14 +410,20 @@ export function RoundScreen({ route }: { route: Extract<Route, { name: "round" }
   const snap = roundSnapshot(state, route.roundId);
   return (
     <>
-      <AppHeader title={snap.round.name} subtitle={`${snap.course.name} · ${snap.course.teeName} · ${snap.course.courseRating}/${snap.course.slopeRating}`} showBack />
-      {route.tab === "overview" && <OverviewTab snap={snap} />}
-      {route.tab === "score" && <ScoreTab key={`score-${route.hole ?? "auto"}`} snap={snap} hole={route.hole} focusPlayer={route.player} />}
-      {route.tab === "scorecard" && <ScorecardTab snap={snap} />}
-      {route.tab === "games" && <GamesTab snap={snap} />}
-      {route.tab === "stats" && <StatsTab snap={snap} />}
-      {route.tab === "finish" && <FinishTab snap={snap} />}
-      <RoundTabs roundId={snap.round.id} tab={route.tab} />
+      {route.tab === "score" ? (
+        <ScoreTab key={`score-${route.hole ?? "auto"}`} snap={snap} hole={route.hole} focusPlayer={route.player} />
+      ) : (
+        <>
+          <AppHeader title={snap.round.name} subtitle={`${snap.course.name} · ${snap.course.teeName} · ${snap.course.courseRating}/${snap.course.slopeRating}`} showBack />
+          {route.tab === "overview" && <OverviewTab snap={snap} />}
+          {route.tab === "scorecard" && <ScorecardTab snap={snap} />}
+          {route.tab === "games" && <GamesTab snap={snap} />}
+          {route.tab === "money" && <MoneyTab snap={snap} />}
+          {route.tab === "stats" && <StatsTab snap={snap} />}
+          {route.tab === "finish" && <FinishTab snap={snap} />}
+          <RoundTabs roundId={snap.round.id} tab={route.tab} />
+        </>
+      )}
     </>
   );
 }
@@ -430,10 +438,25 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: React
   );
 }
 
-function OverviewTab({ snap }: { snap: Snapshot }) {
-  const { state, nav, mutate } = useApp();
+/** Fly the round so far. */
+function ReplayCard({ snap }: { snap: Snapshot }) {
   const [replay, setReplay] = useState(false);
   const replayHoles = replayableHoles(snap);
+  if (replayHoles.length === 0) return null;
+  return (
+    <>
+      <Card title="Replay" action={<span className="text-xs text-muted">{replayHoles.length} hole{replayHoles.length === 1 ? "" : "s"} so far</span>}>
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-ink-2">Fly every hole played so far with everyone&apos;s shots landing in order and the money moving hole by hole.</p>
+          <button type="button" className="btn btn-secondary !min-h-10 text-sm whitespace-nowrap" onClick={() => setReplay(true)} data-testid="replay-open">Replay round</button>
+        </div>
+      </Card>
+      {replay && <RoundReplay snap={snap} onClose={() => setReplay(false)} />}
+    </>
+  );
+}
+function OverviewTab({ snap }: { snap: Snapshot }) {
+  const { state, nav, mutate } = useApp();
   const roundId = snap.round.id;
   const me = snap.players.find((p) => p.playerId === state.actorId);
   const myTotals = me ? snap.totals[me.playerId] : null;
@@ -501,15 +524,7 @@ function OverviewTab({ snap }: { snap: Snapshot }) {
         {snap.sideBets.length > 0 && <p className="text-xs text-ink-2 mt-2">{snap.sideBets.filter((b) => b.status === "PROPOSED").length} pending · {snap.sideBets.filter((b) => b.status === "ACCEPTED").length} open · {snap.sideBets.filter((b) => b.status === "SETTLED").length} settled side bets</p>}
       </Card>
 
-      {replayHoles.length > 0 && (
-        <Card title="Replay" action={<span className="text-xs text-muted">{replayHoles.length} hole{replayHoles.length === 1 ? "" : "s"} so far</span>}>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-ink-2">Fly every hole played so far with everyone&apos;s shots landing in order and the money moving hole by hole.</p>
-            <button type="button" className="btn btn-primary !min-h-10 text-sm whitespace-nowrap" onClick={() => setReplay(true)} data-testid="replay-open">Replay round</button>
-          </div>
-        </Card>
-      )}
-      {replay && <RoundReplay snap={snap} onClose={() => setReplay(false)} />}
+      <ReplayCard snap={snap} />
       <CourseMapCard snap={snap} />
       <Card title="Money position" action={<TextLink className="!text-xs" onClick={() => nav({ name: "money", tripId: snap.round.tripId })}>Trip ledger ›</TextLink>}>
         {roundLedger.length === 0 && <p className="text-sm text-muted">{live ? "Projected from live games; nothing is posted until the round is locked." : "No money posted for this round."}</p>}
@@ -564,6 +579,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const [selectedClub, setSelectedClub] = useState<Shot["club"] | null>(null);
   // bumps whenever the player sets or drags the target, so the club suggestion follows it
   const [aimVersion, setAimVersion] = useState(0);
+  const [sheetOpen, setSheetOpen] = useState(false);
   const onClubChange = useCallback((c: Shot["club"]) => setSelectedClub(c), []);
   // Side bets riding on this hole, as notices on the picture; closing one hides it on this hole for this player.
   const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
@@ -582,7 +598,6 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
       };
     });
   const me = snap.players.find((p) => p.playerId === state.actorId);
-  const dispersion = me && tracking && selectedClub && selectedClub !== "chip" && selectedClub !== "putt" ? playerDispersion(state, snap.round, me.playerId, selectedClub) : null;
   const canTrack = !!me && snap.round.status === "LIVE" && canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: state.actorId, roundStatus: snap.round.status });
   const myShots = me ? holeShots(snap.round, me.playerId, holeNumber) : [];
   // Strategy: simulate every sensible club and aim from where the ball is (phone-side, a few hundred shots each).
@@ -592,13 +607,18 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const lastLie = myShots.length ? myShots[myShots.length - 1].lie : null;
   const bagKey = JSON.stringify(state.players.find((p) => p.id === me?.playerId)?.bag ?? {});
   const aimNow = me ? pendingAim(state, roundId, me.playerId, holeNumber) : null;
+  // Club in hand: the player's pick in the sheet, else the club that fits the target (or what's left to the middle).
+  const suggestedClub: Shot["club"] = me ? (aimNow ? clubForTargetFor(state, snap.round, me.playerId, holeNumber, ballNow, aimNow) : clubForRemaining(state, snap.round, me.playerId, dist(ballNow, shapeNow.green.c))) : "7i";
+  const dispersion = me && (selectedClub ?? suggestedClub) !== "chip" && (selectedClub ?? suggestedClub) !== "putt" ? playerDispersion(state, snap.round, me.playerId, (selectedClub ?? suggestedClub) as Club) : null;
   // Wind and measured ground for this hole: the plays aim into the wind and club up or down for it.
   const env = holeFlightEnv(state, snap.round.courseId, holeNumber);
   const strategyPlan = useMemo(() => {
-    if (!me || !tracking || lastLie === "green" || myShots[myShots.length - 1]?.holed) return null;
+    if (!me || !canTrack || lastLie === "green" || myShots[myShots.length - 1]?.holed) return null;
     return recommend((c) => playerDispersion(state, snap.round, me.playerId, c), ballNow, shapeNow.green.c, shapeNow, me.handicapIndex, risk, 400, env);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [me?.playerId, tracking, lastLie, ballNow.u, ballNow.v, holeNumber, bagKey, myShots.length, risk, snap.round.courseId, env.windU, env.windV]);
+  }, [me?.playerId, canTrack, lastLie, ballNow.u, ballNow.v, holeNumber, bagKey, myShots.length, risk, snap.round.courseId, env.windU, env.windV]);
+  // Club in hand: the player's own pick, else the caddie's recommended club, else what fits the distance.
+  const clubNow: Shot["club"] = selectedClub ?? strategyPlan?.recommended.club ?? suggestedClub;
   const mySg = me ? holeStrokesGained(myShots, shapeNow.green.c, hole.par, me.handicapIndex, sgBaseline(state)) : null;
   // Target (where you want it to finish) → aim line (where to start it) for the club in hand.
   const aimSol = me && dispersion && aimNow ? aimPlan(state, snap.round, me.playerId, holeNumber, dispersion.club, ballNow, aimNow) : null;
@@ -630,138 +650,192 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const leaderLine = snap.leaderboardNet.filter((r) => r.holesPlayed > 0).slice(0, 3);
   const anyEditable = snap.players.some((p) => canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: p.playerId, roundStatus: snap.round.status }));
 
-  return (
-    <Page className="!pt-3">
-      <MiniScorecard snap={snap} current={holeNumber} view={state.scorecardView ?? "gross"} onView={(v) => mutate((s) => setScorecardView(s, v))} onHole={go} dismissed={state.dismissedBetNotes ?? []} onRestore={(hole, betId) => mutate((s) => restoreBetNote(s, roundId, hole, betId))} />
-      <header className="flex items-center justify-between -mb-1">
-        <NavBtn onClick={prev !== null ? () => go(prev) : null} label="Previous hole">‹</NavBtn>
-        <p className="text-xs text-ink-2">Hole {hole.holeNumber} of {snap.holes.length}</p>
-        <NavBtn onClick={next !== null ? () => go(next) : null} label="Next hole">›</NavBtn>
-      </header>
-      <HoleView
-        holeNumber={hole.holeNumber}
-        par={hole.par}
-        yardage={hole.yardage}
-        strokeIndex={hole.strokeIndex}
-        numbers={state.players.find((p) => p.id === state.actorId)?.favoriteYardages ?? [140]}
-        onNumbersChange={(n) => mutate((s) => { const me = s.players.find((p) => p.id === s.actorId); if (me) me.favoriteYardages = n; })}
-        wind={state.wind ?? DEFAULT_WIND}
-        onWindChange={(w) => mutate((s) => { s.wind = w; })}
-        satellite={satelliteOn(state)}
-        flight={env}
-        onSatelliteChange={(on) => mutate((s) => setSatellite(s, on))}
-        tracking={tracking && canTrack}
-        shots={myShots}
-        onShot={(to) => withUndo((s) => { logShot(s, roundId, s.actorId, holeNumber, to); })}
-        onMoveShot={(id, to, first) => (first ? withUndo : mutate)((s) => moveShotRest(s, roundId, id, to))}
-        focusShot={tracking ? myShots.find((s) => s.id === selectedShotId) ?? null : null}
-        others={others}
-        aim={me ? pendingAim(state, roundId, me.playerId, holeNumber) : null}
-        aimMode={aimMode && tracking && canTrack}
-        onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimVersion((v) => v + 1); setAimMode(false); }}
-        aimLine={aimSol ? { at: aimSol.aimLine, offset: aimSol.offset } : null}
-        onAimButton={() => { if (!canTrack) return; if (!tracking) setTracking(true); setAimMode((a) => !a); }}
-        shape={holeShapeFor(state, snap.round.courseId, holeNumber)}
-        notes={holeNotes}
-        dispersion={dispersion}
-        conditions={state.conditions}
-        onConditionsChange={(patch) => mutate((s) => setConditions(s, patch))}
-      />
-      {me && (
-        <div className="card !py-2 flex flex-col gap-1.5">
-          <ShotFilterControl mode={filter.mode} playerIds={filter.playerIds} players={palette} me={me.playerId} hasGroups={hasGroups} onChange={(mode, ids) => mutate((s) => setShotFilter(s, { mode, playerIds: ids }))} />
-          {filter.mode !== "me" && (
-            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="trail-legend">
-              {others.length === 0 && <span className="text-muted">Nobody else has tracked this hole yet.</span>}
-              {others.map((o) => <span key={o.playerId} className="inline-flex items-center gap-1 text-ink-2"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: o.color }} />{o.name} · {o.shots.length} shot{o.shots.length === 1 ? "" : "s"}</span>)}
-            </div>
-          )}
-        </div>
-      )}
-      {me && <HoleMemoryCard snap={snap} playerId={me.playerId} holeNumber={holeNumber} par={hole.par} />}
-      {canTrack && (
-        <ShotLog
-          shots={myShots}
-          tracking={tracking}
-          onToggle={() => { setTracking((t) => !t); setAimMode(false); }}
-          selectedId={selectedShotId}
-          onSelect={setSelectedShotId}
-          aim={pendingAim(state, roundId, me!.playerId, holeNumber)}
-          aimMode={aimMode}
-          onAimMode={() => setAimMode((a) => !a)}
-          onClearAim={() => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, null)); setAimMode(false); }}
-          playerName={me!.displayName}
-          par={hole.par}
-          penalties={findScore(snap.round, me!.playerId, holeNumber).entry.penaltyStrokes}
-          putts={findScore(snap.round, me!.playerId, holeNumber).entry.putts}
-          gross={findScore(snap.round, me!.playerId, holeNumber).entry.grossScore}
-          remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, holeShapeFor(state, snap.round.courseId, holeNumber).green.c)}
-          flag={holeShapeFor(state, snap.round.courseId, holeNumber).green.c}
-          suggested={aimNow ? clubForTargetFor(state, snap.round, me!.playerId, holeNumber, ballNow, aimNow) : clubForRemaining(state, snap.round, me!.playerId, dist(ballNow, holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
-          aimVersion={aimVersion}
-          onMark={(club) => withUndo((s) => {
-            const kind = strategyCurrent ? (strategyPlan?.plays.find((p) => p.sim.club === strategyCurrent.club && Math.abs(p.sim.aimOffset - strategyCurrent.aimOffset) < 5)?.kind ?? "own") : undefined;
-            markBall(s, roundId, s.actorId, holeNumber, club, strategyCurrent && strategyCurrent.club === club ? { club, aimOffset: strategyCurrent.aimOffset, expected: strategyCurrent.expected, kind } : null);
-          })}
-          onClubChange={onClubChange}
-          dispersion={dispersion}
-          strategy={{ current: strategyCurrent, plan: strategyPlan, risk, onRisk: setRisk, advice, onPlay: (club: Club, aim) => { setSelectedClub(club); const sim = strategyPlan?.plays.find((p) => p.sim.club === club && p.sim.aim.u === aim.u && p.sim.aim.v === aim.v)?.sim; mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, sim?.finish ?? aim)); } }}
-          onPutt={(leaveFt) => withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, leaveFt); })}
-          onUpdate={(id, patch) => withUndo((s) => updateShot(s, roundId, id, patch))}
-          onUndo={doUndo}
-          onRedo={doRedo}
-          canUndo={undoStack.length > 0}
-          canRedo={redoStack.length > 0}
-          onHoleOut={(putts) => { const err = mutate((s) => { const r = holeOut(s, roundId, s.actorId, holeNumber, putts); if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict"); }); if (err) setError(err); }}
-          onAddDistance={(yds) => withUndo((s) => { addShotByDistance(s, roundId, s.actorId, holeNumber, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c); })}
-          onSetDistance={(id, yds) => withUndo((s) => setShotDistance(s, roundId, id, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
-          onDelete={(id) => withUndo((s) => deleteShot(s, roundId, id))}
-          sg={mySg ? { ...mySg, baseline: sgBaseline(state) } : null}
-          tips={bagTips(state, state.actorId)}
-          onApplyTip={(t) => mutate((s) => applyBagTip(s, s.actorId, t))}
-          onDismissTip={(t) => mutate((s) => dismissBagTip(s, s.actorId, t))}
-        />
-      )}
-      {snap.round.status !== "LIVE" && <p className="text-sm text-muted text-center">This round is locked. Scores are read-only.</p>}
-      {snap.round.status === "LIVE" && !anyEditable && <p className="text-sm text-brass text-center">You can&apos;t enter scores for this group in {snap.round.scoringMode.toLowerCase().replace("_", " ")} mode. Switch player at the top to try.</p>}
-      {error && <p className="text-sm text-neg text-center">{error}</p>}
-      {snap.players.map((p) => {
-        const row = findScore(snap.round, p.playerId, holeNumber);
-        const editable = canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: p.playerId, roundStatus: snap.round.status });
-        return (
-          <PlayerRow
-            key={p.playerId}
-            name={p.displayName}
-            strokes={p.allocation[holeNumber] ?? 0}
-            par={hole.par}
-            entry={row.entry}
-            synced={row.version > 0}
-            editable={editable}
-            focus={focusPlayer === p.playerId}
-            onChange={(patch) => {
-              setError(null);
-              const err = mutate((s) => {
-                const r = saveScore(s, roundId, p.playerId, holeNumber, patch, findScore(s.rounds.find((x) => x.id === roundId)!, p.playerId, holeNumber).version);
-                if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict");
-              });
-              if (err) setError(err);
-            }}
-          />
-        );
-      })}
-      {snap.round.status === "LIVE" && <NewSideBetForm snap={snap} defaultHole={holeNumber} />}
-      <div className="grid grid-cols-2 gap-2">
-        <Button variant="secondary" onClick={() => nav({ name: "round", roundId, tab: "scorecard" })}>Scorecard</Button>
-        {next !== null ? <Button variant={holeDone ? "primary" : "secondary"} onClick={() => go(next)}>Next hole ›</Button> : <Button onClick={() => nav({ name: "round", roundId, tab: "finish" })}>Finish round</Button>}
-      </div>
-      {leaderLine.length > 0 && <p className="text-xs text-muted text-center">Net: {leaderLine.map((r) => `${r.displayName} ${r.netToPar === 0 ? "E" : r.netToPar > 0 ? `+${r.netToPar}` : r.netToPar}`).join(" · ")}</p>}
-    </Page>
-  );
-}
+  const last = myShots[myShots.length - 1];
+  const holed = !!last?.holed;
+  const onGreen = !holed && !!last && last.lie === "green";
+  const remainingNow = dist(ballNow, shapeNow.green.c);
+  const clubName = clubNow === "chip" ? "Chip" : clubNow === "putt" ? "Putt" : clubWords(clubNow);
+  // One tap marks the ball from GPS; the first tap also switches tracking on.
+  const mark = (club: Shot["club"]) => {
+    if (!canTrack) return;
+    if (!tracking) setTracking(true);
+    withUndo((s) => {
+      const kind = strategyCurrent ? (strategyPlan?.plays.find((p) => p.sim.club === strategyCurrent.club && Math.abs(p.sim.aimOffset - strategyCurrent.aimOffset) < 5)?.kind ?? "own") : undefined;
+      markBall(s, roundId, s.actorId, holeNumber, club, strategyCurrent && strategyCurrent.club === club ? { club, aimOffset: strategyCurrent.aimOffset, expected: strategyCurrent.expected, kind } : null);
+      if (aimSol) noteAimHint(s);
+    });
+  };
+  const puttsSoFar = myShots.filter((sh) => sh.club === "putt").length;
+  const headline = !canTrack
+    ? (snap.round.status !== "LIVE" ? "Round locked" : "The scorer enters this hole")
+    : holed ? `Holed out in ${myShots.length}`
+    : onGreen ? `${Math.round(remainingNow * 3)} ft${puttsSoFar ? ` · putt ${puttsSoFar + 1}` : " for it"}`
+    : advice?.headline ?? `${clubName}, ${Math.round(remainingNow)} to the middle.`;
+  const subline = !canTrack ? "" : holed ? "Nice. On to the next." : onGreen ? "Holed, or how far is left?" : aimNow ? `${clubName} · target ${Math.round(dist(ballNow, aimNow))}` : `${clubName} · ${Math.round(remainingNow)} to the middle`;
+  const pickTab = (t: "score" | "money" | "stats") => nav({ name: "round", roundId, tab: t });
 
-function NavBtn({ onClick, label, children }: { onClick: (() => void) | null; label: string; children: React.ReactNode }) {
-  if (!onClick) return <span className="tap inline-flex items-center justify-center text-line-strong text-2xl" aria-hidden>{children}</span>;
-  return <button type="button" onClick={onClick} aria-label={label} className="tap inline-flex items-center justify-center rounded-xl bg-surface-2 text-2xl font-semibold text-ink">{children}</button>;
+  return (
+    <div className="fixed inset-0 bg-surface overflow-hidden" data-testid="play-screen">
+      <div className="absolute inset-x-0 top-0" style={{ bottom: "calc(104px + env(safe-area-inset-bottom))" }}>
+          <HoleView
+            holeNumber={hole.holeNumber}
+            par={hole.par}
+            yardage={hole.yardage}
+            strokeIndex={hole.strokeIndex}
+            numbers={state.players.find((p) => p.id === state.actorId)?.favoriteYardages ?? [140]}
+            onNumbersChange={(n) => mutate((s) => { const me = s.players.find((p) => p.id === s.actorId); if (me) me.favoriteYardages = n; })}
+            wind={state.wind ?? DEFAULT_WIND}
+            onWindChange={(w) => mutate((s) => { s.wind = w; })}
+            satellite={satelliteOn(state)}
+            flight={env}
+            onSatelliteChange={(on) => mutate((s) => setSatellite(s, on))}
+            tracking={tracking && canTrack}
+            shots={myShots}
+            onShot={(to) => withUndo((s) => { logShot(s, roundId, s.actorId, holeNumber, to); })}
+            onMoveShot={(id, to, first) => (first ? withUndo : mutate)((s) => moveShotRest(s, roundId, id, to))}
+            focusShot={tracking ? myShots.find((s) => s.id === selectedShotId) ?? null : null}
+            others={others}
+            aim={me ? pendingAim(state, roundId, me.playerId, holeNumber) : null}
+            aimMode={aimMode && tracking && canTrack}
+            onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimVersion((v) => v + 1); setAimMode(false); }}
+            aimLine={aimSol ? { at: aimSol.aimLine, offset: aimSol.offset } : null}
+            onAimButton={() => { if (!canTrack) return; if (!tracking) setTracking(true); setAimMode((a) => !a); }}
+            shape={holeShapeFor(state, snap.round.courseId, holeNumber)}
+            notes={holeNotes}
+            dispersion={dispersion}
+            conditions={state.conditions}
+            onConditionsChange={(patch) => mutate((s) => setConditions(s, patch))}
+            layout="play"
+            onPrevHole={prev !== null ? () => go(prev) : undefined}
+            onNextHole={next !== null ? () => go(next) : undefined}
+            aimHint={showAimHint(state)}
+          />
+
+      </div>
+      <Sheet
+        open={sheetOpen}
+        onOpenChange={setSheetOpen}
+        tabs={<SheetTabs active="score" onPick={pickTab} />}
+        summary={
+          <div className="flex items-center justify-between gap-3 min-h-[56px]" data-testid="play-summary">
+            <div className="min-w-0">
+              <p className="font-display text-[15px] leading-snug line-clamp-2" data-testid="play-headline">{headline}</p>
+              {subline && <p className="text-[11px] text-muted mt-0.5 truncate tabular-nums" data-testid="play-subline">{subline}</p>}
+            </div>
+            {canTrack && (holed ? (
+              next !== null ? <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm whitespace-nowrap" onClick={() => go(next)} data-testid="play-next">Next hole ›</button> : <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm whitespace-nowrap" onClick={() => nav({ name: "round", roundId, tab: "finish" })}>Finish round</button>
+            ) : onGreen ? (
+              <div className="flex gap-2 shrink-0">
+                <button type="button" className="btn btn-secondary !min-h-10 px-3 text-sm" onClick={() => setSheetOpen(true)} data-testid="play-missed">Missed</button>
+                <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm" onClick={() => { if (!tracking) setTracking(true); withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, null); }); }} data-testid="play-holed">Holed</button>
+              </div>
+            ) : (
+              <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm whitespace-nowrap shrink-0" onClick={() => mark(clubNow)} data-testid="play-mark">Mark ball</button>
+            ))}
+          </div>
+        }
+      >
+        {canTrack && (
+            <ShotLog
+              shots={myShots}
+              tracking={tracking}
+              onToggle={() => { setTracking((t) => !t); setAimMode(false); }}
+              selectedId={selectedShotId}
+              onSelect={setSelectedShotId}
+              aim={pendingAim(state, roundId, me!.playerId, holeNumber)}
+              aimMode={aimMode}
+              onAimMode={() => setAimMode((a) => !a)}
+              onClearAim={() => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, null)); setAimMode(false); }}
+              playerName={me!.displayName}
+              par={hole.par}
+              penalties={findScore(snap.round, me!.playerId, holeNumber).entry.penaltyStrokes}
+              putts={findScore(snap.round, me!.playerId, holeNumber).entry.putts}
+              gross={findScore(snap.round, me!.playerId, holeNumber).entry.grossScore}
+              remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, holeShapeFor(state, snap.round.courseId, holeNumber).green.c)}
+              flag={holeShapeFor(state, snap.round.courseId, holeNumber).green.c}
+              suggested={strategyPlan?.recommended.club ?? suggestedClub}
+              aimVersion={aimVersion}
+              onMark={mark}
+              onClubChange={onClubChange}
+              dispersion={dispersion}
+              strategy={{ current: strategyCurrent, plan: strategyPlan, risk, onRisk: setRisk, advice, onPlay: (club: Club, aim) => { setSelectedClub(club); const sim = strategyPlan?.plays.find((p) => p.sim.club === club && p.sim.aim.u === aim.u && p.sim.aim.v === aim.v)?.sim; mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, sim?.finish ?? aim)); } }}
+              onPutt={(leaveFt) => withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, leaveFt); })}
+              onUpdate={(id, patch) => withUndo((s) => updateShot(s, roundId, id, patch))}
+              onUndo={doUndo}
+              onRedo={doRedo}
+              canUndo={undoStack.length > 0}
+              canRedo={redoStack.length > 0}
+              onHoleOut={(putts) => { const err = mutate((s) => { const r = holeOut(s, roundId, s.actorId, holeNumber, putts); if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict"); }); if (err) setError(err); }}
+              onAddDistance={(yds) => withUndo((s) => { addShotByDistance(s, roundId, s.actorId, holeNumber, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c); })}
+              onSetDistance={(id, yds) => withUndo((s) => setShotDistance(s, roundId, id, yds, holeShapeFor(state, snap.round.courseId, holeNumber).green.c))}
+              onDelete={(id) => withUndo((s) => deleteShot(s, roundId, id))}
+              sg={mySg ? { ...mySg, baseline: sgBaseline(state) } : null}
+              tips={bagTips(state, state.actorId)}
+              onApplyTip={(t) => mutate((s) => applyBagTip(s, s.actorId, t))}
+              onDismissTip={(t) => mutate((s) => dismissBagTip(s, s.actorId, t))}
+            />
+        )}
+        <MiniScorecard snap={snap} current={holeNumber} view={state.scorecardView ?? "gross"} onView={(v) => mutate((s) => setScorecardView(s, v))} onHole={go} dismissed={state.dismissedBetNotes ?? []} onRestore={(hole, betId) => mutate((s) => restoreBetNote(s, roundId, hole, betId))} />
+        {snap.round.status !== "LIVE" && <p className="text-sm text-muted text-center">This round is locked. Scores are read-only.</p>}
+        {snap.round.status === "LIVE" && !anyEditable && <p className="text-sm text-brass text-center">You can&apos;t enter scores for this group in {snap.round.scoringMode.toLowerCase().replace("_", " ")} mode. Switch player on the You tab.</p>}
+        {error && <p className="text-sm text-neg text-center">{error}</p>}
+        <div className="flex flex-col gap-2" data-testid="player-rows">
+            {snap.players.map((p) => {
+              const row = findScore(snap.round, p.playerId, holeNumber);
+              const editable = canEditScore({ actorId: state.actorId, actorRole, scoringMode: snap.round.scoringMode, scorerPlayerId: snap.round.scorerPlayerId, targetPlayerId: p.playerId, roundStatus: snap.round.status });
+              return (
+                <PlayerRow
+                  key={p.playerId}
+                  name={p.displayName}
+                  strokes={p.allocation[holeNumber] ?? 0}
+                  par={hole.par}
+                  entry={row.entry}
+                  synced={row.version > 0}
+                  editable={editable}
+                  focus={focusPlayer === p.playerId}
+                  onChange={(patch) => {
+                    setError(null);
+                    const err = mutate((s) => {
+                      const r = saveScore(s, roundId, p.playerId, holeNumber, patch, findScore(s.rounds.find((x) => x.id === roundId)!, p.playerId, holeNumber).version);
+                      if (r.status !== "saved") throw new Error(r.status === "forbidden" ? r.reason : "Conflict");
+                    });
+                    if (err) setError(err);
+                  }}
+                />
+              );
+            })}
+        </div>
+        {holeNotes.length > 0 && (
+          <ul className="flex flex-col gap-1.5" data-testid="hole-notes">
+            {holeNotes.map((n) => (
+              <li key={n.id} className={`flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${n.tone === "brass" ? "bg-brass-soft" : "bg-surface-2/70"}`}>
+                <div className="min-w-0 flex-1"><p className="font-semibold leading-tight">{n.title}</p><p className="text-xs text-muted">{n.detail}</p></div>
+                <button type="button" onClick={n.onDismiss} className="tap !min-h-6 !min-w-6 text-muted text-lg leading-none" aria-label={`Hide ${n.title} on this hole`}>×</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {snap.round.status === "LIVE" && <NewSideBetForm snap={snap} defaultHole={holeNumber} />}
+        {me && <HoleMemoryCard snap={snap} playerId={me.playerId} holeNumber={holeNumber} par={hole.par} />}
+        {me && (
+          <div className="card !py-2 flex flex-col gap-1.5">
+            <ShotFilterControl mode={filter.mode} playerIds={filter.playerIds} players={palette} me={me.playerId} hasGroups={hasGroups} onChange={(mode, ids) => mutate((s) => setShotFilter(s, { mode, playerIds: ids }))} />
+            {filter.mode !== "me" && (
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]" data-testid="trail-legend">
+                {others.length === 0 && <span className="text-muted">Nobody else has tracked this hole yet.</span>}
+                {others.map((o) => <span key={o.playerId} className="inline-flex items-center gap-1 text-ink-2"><span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: o.color }} />{o.name} · {o.shots.length} shot{o.shots.length === 1 ? "" : "s"}</span>)}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <Button variant="secondary" onClick={() => nav({ name: "round", roundId, tab: "scorecard" })}>Scorecard</Button>
+          {next !== null ? <Button variant={holeDone ? "primary" : "secondary"} onClick={() => go(next)}>Next hole ›</Button> : <Button onClick={() => nav({ name: "round", roundId, tab: "finish" })}>Finish round</Button>}
+        </div>
+        {leaderLine.length > 0 && <p className="text-xs text-muted text-center">Net: {leaderLine.map((r) => `${r.displayName} ${r.netToPar === 0 ? "E" : r.netToPar > 0 ? `+${r.netToPar}` : r.netToPar}`).join(" · ")}</p>}
+      </Sheet>
+    </div>
+  );
 }
 
 function PlayerRow({ name, strokes, par, entry: e, synced, editable, focus, onChange }: { name: string; strokes: number; par: number; entry: HoleEntry; synced: boolean; editable: boolean; focus: boolean; onChange: (patch: Partial<HoleEntry>) => void }) {
@@ -870,7 +944,8 @@ function StatsTab({ snap }: { snap: Snapshot }) {
       })}
       <StrokesGainedCard snap={snap} />
       <BagCard tips={bagTips(state, state.actorId)} onApplyTip={(t) => mutate((s) => applyBagTip(s, s.actorId, t))} onDismissTip={(t) => mutate((s) => dismissBagTip(s, s.actorId, t))} shots={playerShots(state, state.actorId)} playerId={state.actorId} playerName={snap.players.find((p) => p.playerId === state.actorId)?.displayName ?? ""} bag={state.players.find((p) => p.id === state.actorId)?.bag ?? {}} handicapIndex={state.players.find((p) => p.id === state.actorId)?.handicapIndex ?? 15} onProfile={(club, profile) => mutate((s) => setClubProfile(s, s.actorId, club, profile))} />
-      <p className="text-xs text-muted text-center">Percentages only count holes where that stat was entered. Nothing is inferred from the score.</p>
+      <ReplayCard snap={snap} />
+      <CourseMapCard snap={snap} />
     </Page>
   );
 }
@@ -969,6 +1044,38 @@ function StrokesGainedCard({ snap }: { snap: Snapshot }) {
 
 /* ---------- games + side bets ---------- */
 function GamesTab({ snap }: { snap: Snapshot }) {
+  return <Page><GamesBody snap={snap} /></Page>;
+}
+/** Money for this round: everyone's position, who owes whom, the games and side bets, and the way to lock it. */
+function MoneyTab({ snap }: { snap: Snapshot }) {
+  const { state, nav } = useApp();
+  const roundId = snap.round.id;
+  const live = snap.round.status === "LIVE";
+  const roundLedger = state.ledger.filter((e) => e.roundId === roundId && e.status !== "REVERSED");
+  const roundPayments = roundSettlement(snap).payments;
+  return (
+    <Page>
+      <Card title="Money position" action={<TextLink className="!text-xs" onClick={() => nav({ name: "money", tripId: snap.round.tripId })}>Trip ledger ›</TextLink>}>
+        {roundLedger.length === 0 && <p className="text-sm text-muted">{live ? "Projected from live games; nothing is posted until the round is locked." : "No money posted for this round."}</p>}
+        <ul className="grid grid-cols-2 gap-2 text-sm mt-1">
+          {snap.players.map((p) => {
+            const v = liveMoney(snap, p.playerId);
+            return <li key={p.playerId} className="flex items-center justify-between rounded-lg bg-surface-2/60 px-3 py-2"><span className="font-medium">{p.displayName}</span><span className={`font-semibold ${v > 0 ? "text-ink" : v < 0 ? "text-neg" : "text-muted"}`}>{money(v, { sign: true })}</span></li>;
+          })}
+        </ul>
+        {roundPayments.length > 0 && (
+          <div className="mt-3 border-t border-line pt-2">
+            <p className="label !mb-1">{live ? "If it ended now" : "Who owes whom"}</p>
+            <SettleUpList payments={roundPayments} note={`${snap.course.name} · ${snap.round.name}`} />
+          </div>
+        )}
+      </Card>
+      <GamesBody snap={snap} />
+      {live && <Button onClick={() => nav({ name: "round", roundId, tab: "finish" })}>Finish round</Button>}
+    </Page>
+  );
+}
+function GamesBody({ snap }: { snap: Snapshot }) {
   const { state, mutate } = useApp();
   const names = Object.fromEntries(snap.players.map((p) => [p.playerId, p.displayName]));
   const me = snap.players.find((p) => p.playerId === state.actorId);
@@ -977,7 +1084,7 @@ function GamesTab({ snap }: { snap: Snapshot }) {
   const [error, setError] = useState<string | null>(null);
   const run = (fn: (s: Parameters<typeof mutate>[0] extends (s: infer S) => void ? S : never) => void) => { setError(null); const err = mutate(fn); if (err) setError(err); };
   return (
-    <Page>
+    <>
       {snap.games.length === 0 && <p className="text-sm text-muted">No games configured for this round.</p>}
       {snap.games.map((g) => <GameCard key={g.id} game={g} playerNames={names} />)}
       <Card title="Side bets" action={<span className="text-xs text-muted">Extra · separate from games</span>}>
@@ -1018,7 +1125,7 @@ function GamesTab({ snap }: { snap: Snapshot }) {
         )}
       </Card>
       {live && <NewSideBetForm snap={snap} defaultHole={snap.currentHole} />}
-    </Page>
+    </>
   );
 }
 

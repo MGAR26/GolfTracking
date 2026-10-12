@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState, type React
 import { addPastPinehurstRounds, PAST_TRIP_ID, seedState, type State } from "./store";
 
 /* ---------- routing ---------- */
-export type RoundTab = "overview" | "score" | "scorecard" | "games" | "stats" | "finish";
+export type RoundTab = "overview" | "score" | "scorecard" | "games" | "stats" | "finish" | "money";
 export type Route =
   | { name: "home" }
   | { name: "newTrip" }
@@ -185,19 +185,20 @@ export function AppHeader({ title, subtitle, showBack }: { title: string; subtit
 }
 
 const TABS: { key: RoundTab; label: string; icon: string }[] = [
-  { key: "overview", label: "Overview", icon: "M4 12l8-8 8 8M6 10v10h12V10" },
-  { key: "score", label: "Score", icon: "M12 5v14M5 12h14" },
-  { key: "games", label: "Games", icon: "M8 21h8M12 17v4M7 4h10v5a5 5 0 01-10 0V4zM4 6h3M17 6h3" },
-  { key: "stats", label: "Stats", icon: "M4 20V10M10 20V4M16 20v-7M22 20H2" },
+  { key: "score", label: "Play", icon: "M12 5v14M5 12h14" },
+  { key: "money", label: "Money", icon: "M12 2v20M17 7H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" },
+  { key: "stats", label: "You", icon: "M20 21a8 8 0 10-16 0M12 13a4 4 0 100-8 4 4 0 000 8z" },
 ];
+/** Which of the three tabs a route belongs to. */
+export const tabGroup = (tab: RoundTab): RoundTab => (tab === "score" || tab === "scorecard" ? "score" : tab === "money" || tab === "games" || tab === "finish" ? "money" : "stats");
 
 export function RoundTabs({ roundId, tab }: { roundId: string; tab: RoundTab }) {
   const { nav } = useApp();
   return (
     <nav className="fixed bottom-0 inset-x-0 z-20 border-t border-line bg-surface/95 backdrop-blur pb-[env(safe-area-inset-bottom)]" aria-label="Round">
-      <ul className="mx-auto max-w-lg grid grid-cols-4">
+      <ul className="mx-auto max-w-lg grid grid-cols-3">
         {TABS.map((t) => {
-          const active = t.key === tab || (t.key === "score" && tab === "scorecard");
+          const active = t.key === tabGroup(tab);
           return (
             <li key={t.key}>
               <button type="button" onClick={() => nav({ name: "round", roundId, tab: t.key })} aria-current={active ? "page" : undefined} className={`tap w-full flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-semibold ${active ? "text-ink" : "text-muted"}`}>

@@ -38,7 +38,7 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean; /** Strokes gained shown against the player's own handicap or scratch. */ sgBaseline?: SgBaseline; /** Bag tips put off, as player:club → aimed-shot count at the time. */ dismissedBagTips?: Record<string, number>; /** Rounds where shot tracking is on, as round:player, so it stays on from hole to hole. */ tracking?: string[] }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean; /** Strokes gained shown against the player's own handicap or scratch. */ sgBaseline?: SgBaseline; /** Bag tips put off, as player:club → aimed-shot count at the time. */ dismissedBagTips?: Record<string, number>; /** Shots marked with an aim ring so far: the ring says 'start here' for the first few. */ aimHintsSeen?: number; /** Rounds where shot tracking is on, as round:player, so it stays on from hole to hole. */ tracking?: string[] }
 export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
@@ -225,6 +225,9 @@ export const satelliteOn = (state: State) => state.satellite !== false;
 export const sgBaseline = (state: State): SgBaseline => state.sgBaseline ?? "handicap";
 /** Shot tracking is a per-round, per-player switch: once on, every hole opens ready to mark the ball. */
 export const trackingOn = (state: State, roundId: string, playerId: string) => (state.tracking ?? []).includes(`${roundId}:${playerId}`);
+export const AIM_HINTS = 3;
+export const showAimHint = (state: State) => (state.aimHintsSeen ?? 0) < AIM_HINTS;
+export function noteAimHint(state: State) { state.aimHintsSeen = (state.aimHintsSeen ?? 0) + 1; }
 export function setTrackingOn(state: State, roundId: string, playerId: string, on: boolean) {
   const key = `${roundId}:${playerId}`;
   const rest = (state.tracking ?? []).filter((k) => k !== key);
