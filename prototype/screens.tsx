@@ -618,7 +618,9 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me?.playerId, canTrack, lastLie, ballNow.u, ballNow.v, holeNumber, bagKey, myShots.length, risk, snap.round.courseId, env.windU, env.windV]);
   // Club in hand: the player's own pick, else the caddie's recommended club, else what fits the distance.
-  const clubNow: Shot["club"] = selectedClub ?? strategyPlan?.recommended.club ?? suggestedClub;
+  // With a target set, the club is the one that reaches it (from the bag and what the app has measured);
+  // otherwise the caddie's recommended play, unless the player picked one.
+  const clubNow: Shot["club"] = selectedClub ?? (aimNow ? suggestedClub : strategyPlan?.recommended.club ?? suggestedClub);
   const mySg = me ? holeStrokesGained(myShots, shapeNow.green.c, hole.par, me.handicapIndex, sgBaseline(state)) : null;
   // Target (where you want it to finish) → aim line (where to start it) for the club in hand.
   const aimSol = me && dispersion && aimNow ? aimPlan(state, snap.round, me.playerId, holeNumber, dispersion.club, ballNow, aimNow) : null;
@@ -699,6 +701,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
             aimMode={aimMode && tracking && canTrack}
             onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimVersion((v) => v + 1); setAimMode(false); }}
             aimLine={aimSol ? { at: aimSol.aimLine, offset: aimSol.offset } : null}
+            aimClub={aimNow ? clubName : undefined}
             onAimButton={() => { if (!canTrack) return; if (!tracking) setTracking(true); setAimMode((a) => !a); }}
             shape={holeShapeFor(state, snap.round.courseId, holeNumber)}
             notes={holeNotes}
@@ -753,7 +756,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
               gross={findScore(snap.round, me!.playerId, holeNumber).entry.grossScore}
               remaining={dist(myShots.length ? myShots[myShots.length - 1].to : { u: 0, v: 0 }, holeShapeFor(state, snap.round.courseId, holeNumber).green.c)}
               flag={holeShapeFor(state, snap.round.courseId, holeNumber).green.c}
-              suggested={strategyPlan?.recommended.club ?? suggestedClub}
+              suggested={aimNow ? suggestedClub : strategyPlan?.recommended.club ?? suggestedClub}
               aimVersion={aimVersion}
               onMark={mark}
               onClubChange={onClubChange}
