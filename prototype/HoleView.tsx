@@ -538,7 +538,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
                 <path d={linePath(view, pos, aimLine.at)} stroke="#f7f3ea" strokeWidth={1} strokeDasharray="1 3" fill="none" opacity={0.9} />
                 <circle cx={q.x} cy={q.y} r={5} fill="none" stroke="#b08d3c" strokeWidth={1.6} />
                 <circle cx={q.x} cy={q.y} r={1.4} fill="#b08d3c" />
-                {aimHint && <text x={q.x} y={q.y - 9} textAnchor="middle" {...label} fill="#e9cf8f" data-testid="aim-hint">start</text>}
+                {aimHint && (() => { const side = q.x >= aimPt.x ? 1 : -1; return <text x={q.x + side * 8} y={q.y + 3} textAnchor={side > 0 ? "start" : "end"} {...label} fill="#e9cf8f" data-testid="aim-hint">start</text>; })()}
               </g>
             );
           })()}
@@ -549,7 +549,12 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <circle cx={aimPt.x} cy={aimPt.y} r={2} fill="#f7f3ea" />
               <line x1={aimPt.x - 13} y1={aimPt.y} x2={aimPt.x - 5} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x + 5} y1={aimPt.y} x2={aimPt.x + 13} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} />
               <line x1={aimPt.x} y1={aimPt.y - 13} x2={aimPt.x} y2={aimPt.y - 5} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x} y1={aimPt.y + 5} x2={aimPt.x} y2={aimPt.y + 13} stroke="#f7f3ea" strokeWidth={1.2} />
-              {play && toTarget && <text x={aimPt.x} y={aimPt.y + 24} textAnchor="middle" {...label} data-testid="aim-plays">{aimClub ? `${aimClub} · ` : ""}plays {Math.round(pl.playsLike)}</text>}
+              {play && toTarget && (() => {
+                const sq = aimLine && Math.abs(aimLine.offset) >= 2 ? view.project(aimLine.at) : null;
+                const side = sq ? (sq.x >= aimPt.x ? -1 : 1) : 0; // away from the start ring; below when there is none
+                const x = aimPt.x + side * 14, y = side === 0 ? aimPt.y + 24 : aimPt.y + 3;
+                return <text x={x} y={y} textAnchor={side === 0 ? "middle" : side > 0 ? "start" : "end"} {...label} data-testid="aim-plays">{aimClub ? `${aimClub} · ` : ""}plays {Math.round(pl.playsLike)}</text>;
+              })()}
               {!play && <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>target {Math.round(aimDist ?? 0)}{toTarget ? ` · plays ${Math.round(pl.playsLike)}` : ""}</text>}
               {!play && aimLine && Math.abs(aimLine.offset) >= 2 && <text x={aimPt.x + 15} y={aimPt.y + 13} {...label} fill="#e9cf8f" data-testid="aim-offset">start it {Math.abs(aimLine.offset)} {aimLine.offset > 0 ? "right" : "left"}</text>}
               <circle cx={aimPt.x} cy={aimPt.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("aim")} data-testid="aim-handle" aria-label="Drag aim point" />
