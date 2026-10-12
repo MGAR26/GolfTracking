@@ -15,7 +15,7 @@ const missText = (sh: Shot) => { const m = missFromAim(sh); if (!m) return null;
 export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, aimMode, onAimMode, onClearAim, playerName, par, penalties, putts, gross, remaining, flag, suggested, onMark, onPutt, onClubChange, dispersion, strategy, onUpdate, onUndo, onRedo, canUndo, canRedo, onHoleOut, onAddDistance, onSetDistance, onDelete, sg = null, tips = [], onApplyTip, onDismissTip, aimVersion = 0 }: {
   shots: Shot[]; tracking: boolean; onToggle: () => void; selectedId: string | null; onSelect: (id: string | null) => void; aim: Pt | null; aimMode: boolean; onAimMode: () => void; onClearAim: () => void; playerName: string; par: number; penalties: number; putts: number | null; gross: number | null;
   /** Yards from the ball to the pin, and the club that fits it. */
-  remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void; onClubChange?: (club: Shot["club"]) => void; dispersion?: DispersionModel | null;
+  remaining: number; flag: Pt; suggested: Shot["club"]; onMark: (club: Shot["club"]) => void; onPutt: (leaveFt: number | null) => void; onClubChange?: (club: Shot["club"] | null) => void; dispersion?: DispersionModel | null;
   /** Odds for the selected club at the current aim, the ranked plays, and the risk slider. */
   strategy?: { current: Simulation | null; plan: Strategy | null; risk: number; onRisk: (r: number) => void; onPlay: (club: Club, aim: Pt) => void; planned?: { shots: number; delta: number } | null; advice?: CaddieAdvice | null } | null;
   onUpdate: (id: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) => void; onUndo: () => void; onRedo: () => void; canUndo: boolean; canRedo: boolean; onHoleOut: (putts: number) => void;
@@ -33,8 +33,10 @@ export function ShotLog({ shots, tracking, onToggle, selectedId, onSelect, aim, 
   // Club for the next shot: the suggestion unless the player picked one for this exact shot.
   // the player's own pick holds for this shot until they move the target; then the suggestion follows the target
   const [pick, setPick] = useState<{ forShot: number; club: Shot["club"]; v: number } | null>(null);
-  const club = pick?.forShot === shots.length && pick.v === aimVersion ? pick.club : suggested;
-  useEffect(() => { onClubChange?.(club); }, [club, onClubChange]);
+  const picked = pick?.forShot === shots.length && pick.v === aimVersion ? pick.club : null;
+  const club = picked ?? suggested;
+  // only a hand pick is reported up; the suggestion is the parent's own, so a closed sheet never freezes the club
+  useEffect(() => { onClubChange?.(picked); }, [picked, onClubChange]);
   // Draft text for the distance field so the user can clear it and retype without it snapping back.
   const [draft, setDraft] = useState<{ id: string; text: string } | null>(null);
   const commitDraft = () => {

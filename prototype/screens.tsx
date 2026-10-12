@@ -580,7 +580,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   // bumps whenever the player sets or drags the target, so the club suggestion follows it
   const [aimVersion, setAimVersion] = useState(0);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const onClubChange = useCallback((c: Shot["club"]) => setSelectedClub(c), []);
+  const onClubChange = useCallback((c: Shot["club"] | null) => setSelectedClub(c), []);
   // Side bets riding on this hole, as notices on the picture; closing one hides it on this hole for this player.
   const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
   const betTitle = (t: string) => (t === "LONGEST_DRIVE_IN_FAIRWAY" ? "Long drive" : t === "CLOSEST_TO_PIN" ? "Closest to pin" : t === "HOLE_WINNER" ? "Hole winner" : t.toLowerCase().replace(/_/g, " "));
@@ -666,6 +666,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
       markBall(s, roundId, s.actorId, holeNumber, club, strategyCurrent && strategyCurrent.club === club ? { club, aimOffset: strategyCurrent.aimOffset, expected: strategyCurrent.expected, kind } : null);
       if (aimSol) noteAimHint(s);
     });
+    setSelectedClub(null); // the next shot starts from the caddie's pick again
   };
   const puttsSoFar = myShots.filter((sh) => sh.club === "putt").length;
   const headline = !canTrack
@@ -699,7 +700,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
             others={others}
             aim={me ? pendingAim(state, roundId, me.playerId, holeNumber) : null}
             aimMode={aimMode && tracking && canTrack}
-            onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimVersion((v) => v + 1); setAimMode(false); }}
+            onSetAim={(p) => { mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, p)); setAimVersion((v) => v + 1); setAimMode(false); setSelectedClub(null); /* a moved target picks its own club */ }}
             aimLine={aimSol ? { at: aimSol.aimLine, offset: aimSol.offset } : null}
             aimClub={aimNow ? clubName : undefined}
             onAimButton={() => { if (!canTrack) return; if (!tracking) setTracking(true); setAimMode((a) => !a); }}
@@ -709,8 +710,8 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
             conditions={state.conditions}
             onConditionsChange={(patch) => mutate((s) => setConditions(s, patch))}
             layout="play"
-            onPrevHole={prev !== null ? () => go(prev) : undefined}
-            onNextHole={next !== null ? () => go(next) : undefined}
+            onPrevHole={prev !== null ? () => { setSelectedClub(null); go(prev); } : undefined}
+            onNextHole={next !== null ? () => { setSelectedClub(null); go(next); } : undefined}
             aimHint={showAimHint(state)}
           />
 
