@@ -550,7 +550,6 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <line x1={aimPt.x - 13} y1={aimPt.y} x2={aimPt.x - 5} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x + 5} y1={aimPt.y} x2={aimPt.x + 13} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} />
               <line x1={aimPt.x} y1={aimPt.y - 13} x2={aimPt.x} y2={aimPt.y - 5} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x} y1={aimPt.y + 5} x2={aimPt.x} y2={aimPt.y + 13} stroke="#f7f3ea" strokeWidth={1.2} />
               {play && toTarget && <text x={aimPt.x} y={aimPt.y + 24} textAnchor="middle" {...label} data-testid="aim-plays">{aimClub ? `${aimClub} · ` : ""}plays {Math.round(pl.playsLike)}</text>}
-              {play && toTarget && dist(aim, flag) > 20 && <text x={aimPt.x} y={aimPt.y + 34} textAnchor="middle" {...label} opacity={0.85} data-testid="aim-leaves">leaves {Math.round(playsLike(aim, flag, hole.length, cond, wind, day, hole.elevation).playsLike)}</text>}
               {!play && <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>target {Math.round(aimDist ?? 0)}{toTarget ? ` · plays ${Math.round(pl.playsLike)}` : ""}</text>}
               {!play && aimLine && Math.abs(aimLine.offset) >= 2 && <text x={aimPt.x + 15} y={aimPt.y + 13} {...label} fill="#e9cf8f" data-testid="aim-offset">start it {Math.abs(aimLine.offset)} {aimLine.offset > 0 ? "right" : "left"}</text>}
               <circle cx={aimPt.x} cy={aimPt.y} r={16} fill="transparent" {...grab} onPointerDown={startDrag("aim")} data-testid="aim-handle" aria-label="Drag aim point" />
@@ -581,6 +580,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <div className="font-display text-[30px] leading-none" data-testid="dist-middle">{Math.round(d.middle)}</div>
               <div className="text-[9px] uppercase tracking-[.12em] opacity-85 tabular-nums"><span data-testid="dist-front">F {Math.round(d.front)}</span> · <span data-testid="dist-back">B {Math.round(d.back)}</span></div>
               <button type="button" onClick={() => setEditWind((e) => !e)} className="font-display text-[17px] leading-none mt-1" data-testid="plays-like" aria-expanded={editWind}><span className="font-sans text-[8px] uppercase tracking-[.12em] opacity-85 mr-1">Plays{toTarget ? " · target" : ""}</span>{Math.round(pl.playsLike)}</button>
+              {toTarget && aim && dist(aim, flag) > 20 && <div className="font-display text-[15px] leading-none" data-testid="leaves"><span className="font-sans text-[8px] uppercase tracking-[.12em] opacity-85 mr-1">Leaves</span>{Math.round(playsLike(aim, flag, hole.length, cond, wind, day, hole.elevation).playsLike)}</div>}
               <div className="flex gap-1 mt-0.5" style={{ textShadow: "none" }}>
                 <button type="button" onClick={() => setEditWind((e) => !e)} className="inline-flex items-center gap-1 h-5 px-2 rounded-full bg-ink/55 backdrop-blur text-[10px] font-semibold tabular-nums" aria-label={`Wind ${wind.mph} mph`} data-testid="wind-chip">
                   <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden><g transform={`rotate(${windRel} 12 12)`}><path d="M12 3 L16 12 L12 10 L8 12 Z" fill="#b08d3c" /><line x1="12" y1="10" x2="12" y2="21" stroke="#b08d3c" strokeWidth="2.4" strokeLinecap="round" /></g></svg>{wind.mph}
@@ -589,19 +589,20 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
                   <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden><g transform={`rotate(${fallScreen} 12 12)`}><path d="M12 3 L16 12 L12 10 L8 12 Z" fill="#9cc873" /><line x1="12" y1="10" x2="12" y2="21" stroke="#9cc873" strokeWidth="2.4" strokeLinecap="round" /></g></svg>{cond.tilt.pct}%
                 </div>
               </div>
-            </div>
-            {/* camera: one glyph, a small menu */}
-            <div className="absolute right-3 top-[132px] flex flex-col items-end gap-1">
-              <button type="button" onClick={() => setCamMenu((m) => !m)} className="h-8 w-8 rounded-full bg-ink/55 backdrop-blur text-[var(--bg)] grid place-items-center" aria-label="Camera" aria-expanded={camMenu} data-testid="camera-menu">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden><path d="M4 8h3l2-3h6l2 3h3v10H4z" /><circle cx="12" cy="13" r="3.2" /></svg>
-              </button>
-              {camMenu && (
-                <div className="rounded-xl bg-ink/90 backdrop-blur text-[var(--bg)] p-1 flex flex-col text-[12px] font-semibold shadow-lg" role="menu">
-                  {(["ball", "hole", "green"] as const).map((p) => <button key={p} type="button" role="menuitemradio" aria-checked={preset === p && fly === null} onClick={() => { setPreset(p); setZoom({ k: 1, tx: 0, ty: 0 }); setCamMenu(false); }} className={`text-left px-3 py-1.5 rounded-lg capitalize ${preset === p && fly === null ? "bg-[var(--bg)] text-ink" : ""}`} data-testid={`camera-${p}`}>{p}</button>)}
-                  <button type="button" role="menuitem" onClick={() => { startFly(); setCamMenu(false); }} className="text-left px-3 py-1.5 rounded-lg" data-testid="camera-fly">Fly the hole</button>
-                  {hole.photo && <button type="button" role="menuitem" onClick={() => { onSatelliteChange?.(!satellite); setCamMenu(false); }} className="text-left px-3 py-1.5 rounded-lg" data-testid="satellite-toggle">{photo ? "Hide satellite" : "Show satellite"}</button>}
-                </div>
-              )}
+              {/* camera: the view you are on, with the others under a chevron */}
+              <div className="relative flex flex-col items-end mt-0.5" style={{ textShadow: "none" }}>
+                <button type="button" onClick={() => setCamMenu((m) => !m)} className="inline-flex items-center gap-1 h-6 pl-2.5 pr-1.5 rounded-full bg-ink/55 backdrop-blur text-[var(--bg)] text-[10px] font-semibold uppercase tracking-[.08em]" aria-label="Camera" aria-expanded={camMenu} data-testid="camera-menu">
+                  {fly !== null ? "Flying" : preset === "ball" ? "Ball" : preset === "hole" ? "Hole" : "Green"}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden className={`transition-transform ${camMenu ? "rotate-180" : ""}`}><path d="M6 9l6 6 6-6" /></svg>
+                </button>
+                {camMenu && (
+                  <div className="absolute right-0 top-7 rounded-xl bg-ink/90 backdrop-blur text-[var(--bg)] p-1 flex flex-col text-[12px] font-semibold shadow-lg text-left whitespace-nowrap" role="menu">
+                    {(["ball", "hole", "green"] as const).map((p) => <button key={p} type="button" role="menuitemradio" aria-checked={preset === p && fly === null} onClick={() => { setPreset(p); setZoom({ k: 1, tx: 0, ty: 0 }); setCamMenu(false); }} className={`text-left px-3 py-1.5 rounded-lg capitalize ${preset === p && fly === null ? "bg-[var(--bg)] text-ink" : ""}`} data-testid={`camera-${p}`}>{p}</button>)}
+                    <button type="button" role="menuitem" onClick={() => { startFly(); setCamMenu(false); }} className="text-left px-3 py-1.5 rounded-lg" data-testid="camera-fly">Fly the hole</button>
+                    {hole.photo && <button type="button" role="menuitem" onClick={() => { onSatelliteChange?.(!satellite); setCamMenu(false); }} className="text-left px-3 py-1.5 rounded-lg" data-testid="satellite-toggle">{photo ? "Hide satellite" : "Show satellite"}</button>}
+                  </div>
+                )}
+              </div>
             </div>
             {editWind && (
               <div className="absolute right-3 top-[132px] w-[250px] rounded-xl bg-[var(--bg)]/95 backdrop-blur text-ink p-2.5 shadow-lg flex flex-col gap-2 text-[11px]" data-testid="conditions-panel">
