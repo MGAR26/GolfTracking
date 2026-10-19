@@ -39,6 +39,21 @@ export type CameraPreset = "ball" | "hole" | "green";
 /** Inside this many yards of the flag the view switches to straight down over the green. */
 const GREEN_VIEW_YDS = 40;
 
+/** A polygon `half` yards either side of the hole's centreline, tee through green. */
+function corridorBand(hole: HoleShape, half: number): Pt[] {
+  const line = [hole.tee, ...hole.line.filter((p) => dist(p, hole.tee) > 5), hole.green.c].filter((p, i, a) => i === 0 || dist(p, a[i - 1]) > 5);
+  if (line.length < 2) return [];
+  const left: Pt[] = [], right: Pt[] = [];
+  for (let i = 0; i < line.length; i++) {
+    const a = line[Math.max(0, i - 1)], b = line[Math.min(line.length - 1, i + 1)];
+    const d = dist(a, b) || 1, nu = -(b.v - a.v) / d, nv = (b.u - a.u) / d;
+    const w = i === line.length - 1 ? half + Math.max(hole.green.ru, hole.green.rv) : half;
+    left.push({ u: line[i].u + nu * w, v: line[i].v + nv * w });
+    right.push({ u: line[i].u - nu * w, v: line[i].v - nv * w });
+  }
+  return [...left, ...right.reverse()];
+}
+
 /** Camera behind `pos`, facing `flag`; zoom scales with the remaining distance. */
 function makeView(pos: Pt, flag: Pt, green: Ellipse, h = H): View {
   // where the flag and the ball sit in the frame: a quarter down and just above the bottom edge
@@ -416,6 +431,25 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           <g transform={`translate(${zoom.tx} ${zoom.ty}) scale(${zoom.k})`} data-testid="zoom-layer">
           <rect width={W} height={VH} fill="url(#ground)" />
           {photo && <SatelliteLayer photo={photo} view={view} id={`sat-${holeNumber}`} coarse={fly !== null} />}
+          {play && photo && (
+            <>
+              <defs>
+                <filter id={`soft-${holeNumber}`} x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation={view.overhead ? 10 : 7} /></filter>
+                <mask id={`corridor-${holeNumber}`} maskUnits="userSpaceOnUse" x={0} y={0} width={W} height={VH}>
+                  <rect width={W} height={VH} fill="white" />
+                  <g fill="black" stroke="black" strokeWidth={18} strokeLinejoin="round" filter={`url(#soft-${holeNumber})`}>
+                    {/* the hole's corridor: a wide band along the centreline (waste areas and the walk between are in play too) */}
+                    <path d={polyPath(view, corridorBand(hole, 38))} />
+                    {fairwayOutlines(hole).map((f, i) => <path key={`f${i}`} d={polyPath(view, f)} />)}
+                    <path d={polyPath(view, greenOutline(hole))} />
+                    {bunkerOutlines(hole).map((b, i) => <path key={`b${i}`} d={polyPath(view, b)} />)}
+                    <circle cx={view.project({ u: 0, v: 0 }).x} cy={view.project({ u: 0, v: 0 }).y} r={16} />
+                  </g>
+                </mask>
+              </defs>
+              <rect width={W} height={VH} fill="#f3efe6" fillOpacity={0.62} mask={`url(#corridor-${holeNumber})`} pointerEvents="none" data-testid="corridor-fade" />
+            </>
+          )}
           {waterOutlines(hole).map((w, i) => <path key={`w${i}`} d={polyPath(view, w)} fill="#6d9fc4" fillOpacity={photo ? 0.35 : 1} stroke="#4d7fa6" strokeWidth={1} />)}
           {fairwayOutlines(hole).map((f, i) => <path key={`f${i}`} d={polyPath(view, f)} fill="url(#fw)" fillOpacity={photo ? 0.18 : 1} stroke="#86ab5c" strokeWidth={0.8} strokeOpacity={photo ? 0.7 : 1} />)}
           {bunkerOutlines(hole).map((b, i) => <path key={i} d={polyPath(view, b)} fill="#e8dcb0" fillOpacity={photo ? 0.25 : 1} stroke="#cbbb84" strokeWidth={0.8} />)}
@@ -545,6 +579,18 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
           {aimPt && aim && (
             <g data-testid="aim-marker">
               <path d={linePath(view, pos, aim)} stroke="#b08d3c" strokeWidth={1.2} strokeDasharray="2 2" fill="none" />
+              {play && toTarget && dist(aim, flag) > 20 && <path d={linePath(view, aim, flag)} stroke="#f7f3ea" strokeWidth={1} strokeDasharray="2 2" fill="none" opacity={0.8} />}
+              {play && toTarget && (() => {
+                const big = { fontSize: 13, fill: "#f7f3ea", fontWeight: 800, style: { paintOrder: "stroke" as const, stroke: "rgba(27,42,65,0.7)", strokeWidth: 3 } };
+                const m1 = view.project({ u: (pos.u + aim.u) / 2, v: (pos.v + aim.v) / 2 });
+                const m2 = view.project({ u: (aim.u + flag.u) / 2, v: (aim.v + flag.v) / 2 });
+                return (
+                  <>
+                    <text x={m1.x + 8} y={m1.y + 4} textAnchor="start" {...big} data-testid="line-plays">{Math.round(pl.playsLike)}</text>
+                    {dist(aim, flag) > 20 && <text x={m2.x + 8} y={m2.y + 4} textAnchor="start" {...big} data-testid="line-leaves">{Math.round(playsLike(aim, flag, hole.length, cond, wind, day, hole.elevation).playsLike)}</text>}
+                  </>
+                );
+              })()}
               <circle cx={aimPt.x} cy={aimPt.y} r={9} fill="none" stroke="#f7f3ea" strokeWidth={1.4} />
               <circle cx={aimPt.x} cy={aimPt.y} r={2} fill="#f7f3ea" />
               <line x1={aimPt.x - 13} y1={aimPt.y} x2={aimPt.x - 5} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} /><line x1={aimPt.x + 5} y1={aimPt.y} x2={aimPt.x + 13} y2={aimPt.y} stroke="#f7f3ea" strokeWidth={1.2} />
@@ -553,7 +599,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
                 const sq = aimLine && Math.abs(aimLine.offset) >= 2 ? view.project(aimLine.at) : null;
                 const side = sq ? (sq.x >= aimPt.x ? -1 : 1) : 0; // away from the start ring; below when there is none
                 const x = aimPt.x + side * 14, y = side === 0 ? aimPt.y + 24 : aimPt.y + 3;
-                return <text x={x} y={y} textAnchor={side === 0 ? "middle" : side > 0 ? "start" : "end"} {...label} data-testid="aim-plays">{aimClub ? `${aimClub} · ` : ""}plays {Math.round(pl.playsLike)}</text>;
+                return <text x={x} y={y} textAnchor={side === 0 ? "middle" : side > 0 ? "start" : "end"} {...label} data-testid="aim-plays">{aimClub ?? `plays ${Math.round(pl.playsLike)}`}</text>;
               })()}
               {!play && <text x={aimPt.x + 15} y={aimPt.y + 3} {...label}>target {Math.round(aimDist ?? 0)}{toTarget ? ` · plays ${Math.round(pl.playsLike)}` : ""}</text>}
               {!play && aimLine && Math.abs(aimLine.offset) >= 2 && <text x={aimPt.x + 15} y={aimPt.y + 13} {...label} fill="#e9cf8f" data-testid="aim-offset">start it {Math.abs(aimLine.offset)} {aimLine.offset > 0 ? "right" : "left"}</text>}
@@ -585,7 +631,6 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
               <div className="font-display text-[30px] leading-none" data-testid="dist-middle">{Math.round(d.middle)}</div>
               <div className="text-[9px] uppercase tracking-[.12em] opacity-85 tabular-nums"><span data-testid="dist-front">F {Math.round(d.front)}</span> · <span data-testid="dist-back">B {Math.round(d.back)}</span></div>
               <button type="button" onClick={() => setEditWind((e) => !e)} className="font-display text-[17px] leading-none mt-1" data-testid="plays-like" aria-expanded={editWind}><span className="font-sans text-[8px] uppercase tracking-[.12em] opacity-85 mr-1">Plays{toTarget ? " · target" : ""}</span>{Math.round(pl.playsLike)}</button>
-              {toTarget && aim && dist(aim, flag) > 20 && <div className="font-display text-[15px] leading-none" data-testid="leaves"><span className="font-sans text-[8px] uppercase tracking-[.12em] opacity-85 mr-1">Leaves</span>{Math.round(playsLike(aim, flag, hole.length, cond, wind, day, hole.elevation).playsLike)}</div>}
               <div className="flex gap-1 mt-0.5" style={{ textShadow: "none" }}>
                 <button type="button" onClick={() => setEditWind((e) => !e)} className="inline-flex items-center gap-1 h-5 px-2 rounded-full bg-ink/55 backdrop-blur text-[10px] font-semibold tabular-nums" aria-label={`Wind ${wind.mph} mph`} data-testid="wind-chip">
                   <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden><g transform={`rotate(${windRel} 12 12)`}><path d="M12 3 L16 12 L12 10 L8 12 Z" fill="#b08d3c" /><line x1="12" y1="10" x2="12" y2="21" stroke="#b08d3c" strokeWidth="2.4" strokeLinecap="round" /></g></svg>{wind.mph}
