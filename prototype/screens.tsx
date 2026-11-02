@@ -582,6 +582,9 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   // bumps whenever the player sets or drags the target, so the club suggestion follows it
   const [aimVersion, setAimVersion] = useState(0);
   const [sheetOpen, setSheetOpen] = useState(false);
+  // "Missed": how much is left, in feet, stepped or typed, then logged as the putt's leave
+  const [leave, setLeave] = useState<number | null>(null);
+  const [leaveText, setLeaveText] = useState("");
   const onClubChange = useCallback((c: Shot["club"] | null) => setSelectedClub(c), []);
   // Side bets riding on this hole, as notices on the picture; closing one hides it on this hole for this player.
   const nameOfId = (id: string) => snap.players.find((p) => p.playerId === id)?.displayName.split(" ")[0] ?? "?";
@@ -736,7 +739,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
               <p className="font-display text-[15px] leading-snug line-clamp-2" data-testid="play-headline">{headline}</p>
               {subline && <p className="text-[11px] text-muted mt-0.5 truncate tabular-nums" data-testid="play-subline">{subline}</p>}
             </div>
-            {canTrack && undoStack.length > 0 && !holed && (
+            {canTrack && undoStack.length > 0 && !holed && leave === null && (
               <button type="button" onClick={doUndo} className="shrink-0 h-10 w-10 rounded-full border border-line-strong bg-surface grid place-items-center text-ink-2" aria-label="Undo the last mark" title="Undo" data-testid="play-undo">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 14 4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" /></svg>
               </button>
@@ -744,10 +747,22 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
             {canTrack && (holed ? (
               next !== null ? <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm whitespace-nowrap" onClick={() => go(next)} data-testid="play-next">Next hole ›</button> : <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm whitespace-nowrap" onClick={() => nav({ name: "round", roundId, tab: "finish" })}>Finish round</button>
             ) : onGreen ? (
-              <div className="flex gap-2 shrink-0">
-                <button type="button" className="btn btn-secondary !min-h-10 px-3 text-sm" onClick={() => setSheetOpen(true)} data-testid="play-missed">Missed</button>
-                <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm" onClick={() => { if (!tracking) setTracking(true); withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, null); }); }} data-testid="play-holed">Holed</button>
-              </div>
+              leave !== null ? (
+                <div className="flex items-center gap-1.5 shrink-0" data-testid="leave-stepper">
+                  <button type="button" onClick={() => { const n = Math.max(1, (leave ?? 3) - 1); setLeave(n); setLeaveText(String(n)); }} className="h-10 w-10 rounded-full border border-line-strong bg-surface text-xl leading-none" aria-label="A foot less">−</button>
+                  <label className="flex items-baseline gap-1 text-sm">
+                    <input type="number" inputMode="numeric" min={1} max={99} value={leaveText} onChange={(e) => { setLeaveText(e.target.value); const n = Number(e.target.value); if (n >= 1) setLeave(Math.round(n)); }} onFocus={(e) => e.target.select()} className="field !min-h-10 w-14 text-center font-display text-xl !px-1" aria-label="Feet left" data-testid="leave-input" />
+                    <span className="text-muted whitespace-nowrap">ft left</span>
+                  </label>
+                  <button type="button" onClick={() => { const n = Math.min(99, (leave ?? 3) + 1); setLeave(n); setLeaveText(String(n)); }} className="h-10 w-10 rounded-full border border-line-strong bg-surface text-xl leading-none" aria-label="A foot more">+</button>
+                  <button type="button" className="btn btn-primary !min-h-10 px-3 text-sm" onClick={() => { withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, leave); }); setLeave(null); }} data-testid="leave-log">Log</button>
+                </div>
+              ) : (
+                <div className="flex gap-2 shrink-0">
+                  <button type="button" className="btn btn-secondary !min-h-10 px-3 text-sm" onClick={() => { setLeave(3); setLeaveText("3"); }} data-testid="play-missed">Missed</button>
+                  <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm" onClick={() => { if (!tracking) setTracking(true); withUndo((s) => { logPutt(s, roundId, s.actorId, holeNumber, null); }); }} data-testid="play-holed">Holed</button>
+                </div>
+              )
             ) : (
               <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm whitespace-nowrap shrink-0" onClick={() => mark(clubNow)} data-testid="play-mark">Mark ball</button>
             ))}
