@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useApp, AppHeader, RoundTabs, type Route } from "./App";
 import { Button, Card, GameCard, Leaderboard, Page, Pill, Scorecard, StrokeDots, TextLink, ToPar } from "./ui";
 import { HoleView, TRAIL_COLORS } from "./HoleView";
@@ -658,6 +658,14 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
   const holed = !!last?.holed;
   const onGreen = !holed && !!last && last.lie === "green";
   const remainingNow = dist(ballNow, shapeNow.green.c);
+  // The target is always on the picture: after each shot the caddie's recommended finish becomes the
+  // next target until the player drags it somewhere else.
+  const autoAim = me && tracking && canTrack && !aimNow && !onGreen && !holed && strategyPlan ? strategyPlan.recommended.finish : null;
+  useEffect(() => {
+    if (!autoAim) return;
+    mutate((s) => setPendingAim(s, roundId, s.actorId, holeNumber, autoAim));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoAim?.u, autoAim?.v, roundId, holeNumber]);
   const clubName = clubNow === "chip" ? "Chip" : clubNow === "putt" ? "Putt" : clubWords(clubNow);
   // One tap marks the ball from GPS; the first tap also switches tracking on.
   const mark = (club: Shot["club"]) => {
