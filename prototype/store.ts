@@ -815,10 +815,16 @@ function resyncTrackedScore(state: State, roundId: string, playerId: string, hol
   const pen = existing.entry.penaltyStrokes;
   if (all.length === 0 && !(existing.version > 0 && existing.entry.putts !== null)) return;
   const patch: Partial<HoleEntry> = {};
+  const holed = all[all.length - 1]?.holed === true;
   if (putts.length > 0) {
     // Tracked putts own the putt count; the hole is scored once the last putt dropped.
-    const holed = all[all.length - 1]?.holed === true;
     Object.assign(patch, holed ? { grossScore: strokes + putts.length + pen, putts: putts.length } : { grossScore: null, putts: null });
+  } else if (holed) {
+    // Holed from off the green (a chip-in, an ace): no putts, the hole is done.
+    Object.assign(patch, { grossScore: strokes + pen, putts: 0 });
+  } else if (existing.entry.putts === 0 && all.length > 0) {
+    // that hole-out was taken back: the hole is open again
+    Object.assign(patch, { grossScore: null, putts: null });
   } else if (existing.version > 0 && existing.entry.putts !== null) {
     patch.grossScore = strokes + existing.entry.putts + pen;
   }

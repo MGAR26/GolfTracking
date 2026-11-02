@@ -739,7 +739,7 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
               <p className="font-display text-[15px] leading-snug line-clamp-2" data-testid="play-headline">{headline}</p>
               {subline && <p className="text-[11px] text-muted mt-0.5 truncate tabular-nums" data-testid="play-subline">{subline}</p>}
             </div>
-            {canTrack && undoStack.length > 0 && !holed && leave === null && (
+            {canTrack && undoStack.length > 0 && leave === null && (
               <button type="button" onClick={doUndo} className="shrink-0 h-10 w-10 rounded-full border border-line-strong bg-surface grid place-items-center text-ink-2" aria-label="Undo the last mark" title="Undo" data-testid="play-undo">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 14 4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" /></svg>
               </button>
@@ -764,7 +764,11 @@ function ScoreTab({ snap, hole: requested, focusPlayer }: { snap: Snapshot; hole
                 </div>
               )
             ) : (
-              <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm whitespace-nowrap shrink-0" onClick={() => mark(clubNow)} data-testid="play-mark">Mark ball</button>
+              <div className="flex gap-2 shrink-0">
+                {/* a chip-in, a holed approach, an ace: the shot in hand went in */}
+                <button type="button" className="btn btn-secondary !min-h-10 px-3 text-sm" onClick={() => { if (!tracking) setTracking(true); withUndo((s) => { logShot(s, roundId, s.actorId, holeNumber, shapeNow.green.c, { club: clubNow, holed: true }); }); }} data-testid="play-holed-out">Holed</button>
+                <button type="button" className="btn btn-primary !min-h-10 px-4 text-sm whitespace-nowrap" onClick={() => mark(clubNow)} data-testid="play-mark">Mark ball</button>
+              </div>
             ))}
           </div>
         }
