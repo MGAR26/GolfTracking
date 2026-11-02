@@ -35,4 +35,6 @@ writeFileSync(path.join(out, "index.html"), html);
 // Baked course imagery (satellite photos per hole) ships next to the bundle.
 const courses = path.join(root, "prototype", "courses");
 if (existsSync(courses)) cpSync(courses, path.join(out, "courses"), { recursive: true, filter: (src) => !src.endsWith(".json") });
+const art = path.join(root, "prototype", "art");
+if (existsSync(art)) cpSync(art, path.join(out, "art"), { recursive: true });
 console.log("prototype built →", out);

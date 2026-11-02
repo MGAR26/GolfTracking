@@ -15,6 +15,7 @@
   --tint: #ece4d3;
   --brass: #b08d3c;
   --brass-soft: #f3ead6;
+  --pos: #2f6b3a;
   --neg: #7a1f2b;
   --neg-soft: #f1dfdc;
   --radius: 14px;
@@ -36,6 +37,7 @@
   --color-tint: var(--tint);
   --color-brass: var(--brass);
   --color-brass-soft: var(--brass-soft);
+  --color-pos: var(--pos);
   --color-neg: var(--neg);
   --color-neg-soft: var(--neg-soft);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;

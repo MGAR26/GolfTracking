@@ -38,7 +38,7 @@ export interface Round {
   /** Playing groups (foursomes). A round without groups is one group. */
   groups?: { name: string; playerIds: string[] }[];
 }
-export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean; /** Strokes gained shown against the player's own handicap or scratch. */ sgBaseline?: SgBaseline; /** Bag tips put off, as player:club → aimed-shot count at the time. */ dismissedBagTips?: Record<string, number>; /** Shots marked with an aim ring so far: the ring says 'start here' for the first few. */ aimHintsSeen?: number; /** Rounds where shot tracking is on, as round:player, so it stays on from hole to hole. */ tracking?: string[] }
+export interface State { players: Player[]; trips: Trip[]; courses: Course[]; rounds: Round[]; ledger: LedgerEntry[]; actorId: string; audit: { at: string; actorId: string; action: string; detail: string }[]; wind?: { mph: number; fromDeg: number }; /** Aim point set for the next shot, keyed round:player:hole. */ pendingAims?: Record<string, Pt>; /** Whose shots to draw on the hole view. */ shotFilter?: ShotFilter; /** Scorecard strip: gross, net or both. */ scorecardView?: ScorecardView; /** Real hole outlines loaded from OpenStreetMap, by course id. */ courseGeometry?: Record<string, RealCourse>; /** Side-bet notices the player closed on a hole (round:hole:bet). */ dismissedBetNotes?: string[]; /** Day conditions for plays-like (temperature, altitude, turf). */ conditions?: Partial<Conditions>; /** Draw the baked satellite photo under the hole (default on). */ satellite?: boolean; /** Strokes gained shown against the player's own handicap or scratch. */ sgBaseline?: SgBaseline; /** Bag tips put off, as player:club → aimed-shot count at the time. */ dismissedBagTips?: Record<string, number>; /** Shots marked with an aim ring so far: the ring says 'start here' for the first few. */ aimHintsSeen?: number; /** Rounds where shot tracking is on, as round:player, so it stays on from hole to hole. */ tracking?: string[]; /** Settle-up payments marked paid, as trip:from:to:cents. */ paidPayments?: string[] }
 export type ScorecardView = "gross" | "net" | "both";
 export type ShotFilterMode = "me" | "group" | "all" | "custom";
 export interface ShotFilter { mode: ShotFilterMode; playerIds: string[] }
@@ -322,6 +322,14 @@ export function setVenmo(state: State, playerId: string, raw: string | null) {
 export function roundSettlement(snap: Snapshot) {
   const balances = Object.fromEntries(snap.players.map((p) => [p.playerId, liveMoney(snap, p.playerId)]));
   return optimizeSettlement(balances);
+}
+
+/* ---------- settle-up: paid ticks ---------- */
+const paidKey = (tripId: string, p: { fromPlayerId: string; toPlayerId: string; amountCents: number }) => `${tripId}:${p.fromPlayerId}:${p.toPlayerId}:${p.amountCents}`;
+export const isPaid = (state: State, tripId: string, p: { fromPlayerId: string; toPlayerId: string; amountCents: number }) => (state.paidPayments ?? []).includes(paidKey(tripId, p));
+export function togglePaid(state: State, tripId: string, p: { fromPlayerId: string; toPlayerId: string; amountCents: number }) {
+  const k = paidKey(tripId, p); const list = state.paidPayments ?? [];
+  state.paidPayments = list.includes(k) ? list.filter((x) => x !== k) : [...list, k];
 }
 
 /* ---------- trips ---------- */

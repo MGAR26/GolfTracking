@@ -9,6 +9,7 @@ export type Route =
   | { name: "trip"; tripId: string }
   | { name: "newRound"; tripId: string }
   | { name: "money"; tripId: string }
+  | { name: "story"; roundId: string }
   | { name: "round"; roundId: string; tab: RoundTab; hole?: number; player?: string };
 
 interface Ctx {
@@ -34,7 +35,7 @@ function load(): State {
       // demo Venmo usernames for saved demos made before payments existed (John stays blank on purpose)
       const demo: Record<string, string> = { p_matt: "GTO-Demo-Matt", p_marcus: "GTO-Demo-Marcus", p_ryan: "GTO-Demo-Ryan" };
       if (!(saved as State & { demoVenmo?: boolean }).demoVenmo) { for (const p of saved.players) if (demo[p.id] && !p.venmo) p.venmo = demo[p.id]; (saved as State & { demoVenmo?: boolean }).demoVenmo = true; try { window.localStorage.setItem(STORAGE, JSON.stringify(saved)); } catch { /* convenience only */ } }
-      if (!saved.trips.some((t) => t.id === PAST_TRIP_ID)) { addPastPinehurstRounds(saved); try { window.localStorage.setItem(STORAGE, JSON.stringify(saved)); } catch { /* convenience only */ } }
+      if (saved.trips.length > 0 && !saved.trips.some((t) => t.id === PAST_TRIP_ID)) { addPastPinehurstRounds(saved); try { window.localStorage.setItem(STORAGE, JSON.stringify(saved)); } catch { /* convenience only */ } }
       return saved;
     }
   } catch {
@@ -59,6 +60,7 @@ function routeIsValid(r: Route, s: State): boolean {
     case "newRound":
     case "money":
       return s.trips.some((t) => t.id === r.tripId);
+    case "story":
     case "round":
       return s.rounds.some((x) => x.id === r.roundId);
   }

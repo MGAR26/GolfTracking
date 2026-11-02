@@ -6,6 +6,7 @@ import { RoundReplay, replayableHoles } from "./Replay";
 import { Sheet, SheetTabs } from "./Sheet";
 import { clubWords } from "./caddie";
 import { SettleUpList, VenmoField } from "./SettleUp";
+import { NoTripScreen } from "./TripScreens";
 import { ShotLog, BagCard, ShotFilterControl } from "./ShotLog";
 import { addShotByDistance, clubForRemaining, deleteShot, groupMates, holeMoney, holeOut, holeShapeFor, holeShots, deleteRound, dismissBetNote, restoreBetNote, holeFlightEnv, DEFAULT_WIND, roundSettlement, aimPlan, clubForTargetFor, showAimHint, noteAimHint, bagTips, applyBagTip, dismissBagTip, playerShots, playerDispersion, satelliteOn, setClubProfile, setConditions, setSatellite, setSgBaseline, setTrackingOn, sgBaseline, trackingOn, logPutt, logShot, markBall, moveShotRest, pendingAim, replaceHoleShots, setCourseGeometry, setPendingAim, setShotDistance, setShotFilter, updateShot } from "./store";
 import type { State } from "./store";
@@ -31,6 +32,7 @@ import { formatDateRange, formatTime, money, plural } from "../src/lib/format";
 /* ================= Home ================= */
 export function HomeScreen() {
   const { state, nav } = useApp();
+  if (state.trips.length === 0) return <NoTripScreen />;
   return (
     <>
       <AppHeader title="Golf Trip OS" subtitle="Trips" showBack={false} />
@@ -1209,7 +1211,7 @@ function FinishTab({ snap }: { snap: Snapshot }) {
         </Card>
       )}
       {error && <p className="text-sm text-neg">{error}</p>}
-      <Button disabled={problems.length > 0} onClick={() => { const err = mutate((s) => finishRound(s, roundId)); if (err) setError(err); else nav({ name: "trip", tripId: snap.round.tripId }); }}>Lock round & post results</Button>
+      <Button disabled={problems.length > 0} onClick={() => { const err = mutate((s) => finishRound(s, roundId)); if (err) setError(err); else nav({ name: "story", roundId }); }}>Lock round & post results</Button>
       <p className="text-xs text-muted text-center">Locking makes scores read-only, posts ledger entries, and {snap.round.countsTowardTrip ? "adds this round to trip standings" : "keeps this round standalone"}. Organizers can reopen with an audited correction.</p>
     </Page>
   );
