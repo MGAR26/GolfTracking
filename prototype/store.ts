@@ -617,7 +617,9 @@ export function logShot(state: State, roundId: string, playerId: string, holeNum
   const aim = state.pendingAims?.[key] ?? null;
   const shot: Shot = { id: uid(), ...shotFrom(from, to, playerId, holeNumber, prior.length + 1, round.shots, aim) };
   shot.lie = autoLie(state, round, holeNumber, to);
-  if (opts.club) shot.club = opts.club;
+  // A stroke played from the green is a putt, however it was logged (a tap on the picture included).
+  const fromGreen = prior.length > 0 && prior[prior.length - 1].lie === "green";
+  if (opts.club) shot.club = opts.club; else if (fromGreen) shot.club = "putt";
   if (aim && shot.club !== "putt" && shot.club !== "chip") {
     // keep where the app said to start it and where a neutral swing would have finished, so the miss excludes the wind
     const plan = opts.aimPlan ?? aimPlan(state, round, playerId, holeNumber, shot.club, from, aim);
@@ -728,7 +730,10 @@ export function pendingAim(state: State, roundId: string, playerId: string, hole
 export function updateShot(state: State, roundId: string, shotId: string, patch: Partial<Pick<Shot, "club" | "shape" | "trajectory" | "lie">>) {
   const round = state.rounds.find((r) => r.id === roundId)!;
   const shot = (round.shots ?? []).find((s) => s.id === shotId);
-  if (shot) Object.assign(shot, patch);
+  if (!shot) return;
+  Object.assign(shot, patch);
+  // changing a club between putt and not-putt changes the card's putt count
+  resyncTrackedScore(state, roundId, shot.playerId, shot.holeNumber);
 }
 /** Rest points are the truth: after any edit, each shot starts where the previous one ended. */
 function rechain(round: Round, playerId: string, holeNumber: number) {
