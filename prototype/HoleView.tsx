@@ -66,6 +66,7 @@ function makeView(pos: Pt, flag: Pt, green: Ellipse, h = H): View {
   // forward: from you to the flag; straight up the hole when you're on top of it
   const fu = d0 > 1 ? (flag.u - pos.u) / d0 : 1, fv = d0 > 1 ? (flag.v - pos.v) / d0 : 0;
   const ru = -fv, rv = fu; // right of the line of play
+  if (playFrame && d0 <= GREEN_VIEW_YDS && onGreen(green, pos)) return puttView(pos, flag, fu, fv, h);
   if (d0 <= GREEN_VIEW_YDS) return overheadView(pos, green, fu, fv, true, h);
   // steeper (more overhead) the closer you are: ratio of camera set-back to shot length
   const t = Math.min(1, Math.max(0, (D - 100) / 250)); // 0 inside 100 yds … 1 at 350+
@@ -89,6 +90,28 @@ function makeView(pos: Pt, flag: Pt, green: Ellipse, h = H): View {
   return { toView, project, projectView, unproject, near: -camBack + 8, horizon: HORIZON, overhead: false, h };
 }
 /** Straight down over the green, rotated so the line from you to the flag points up the screen. */
+/** Is the point on the putting surface (the fitted green ellipse)? */
+export function onGreen(green: Ellipse, p: Pt): boolean {
+  const du = p.u - green.c.u, dv = p.v - green.c.v;
+  return (du * du) / (green.ru * green.ru) + (dv * dv) / (green.rv * green.rv) <= 1.05;
+}
+/** Putting: straight down on the putt, ball at the bottom and the hole at the top, zoomed so the putt fills the picture. */
+function puttView(pos: Pt, flag: Pt, fu0: number, fv0: number, h: number): View {
+  // the hole is always straight up the screen, even on a tap-in
+  const d = dist(pos, flag);
+  const fu = d > 0.15 ? (flag.u - pos.u) / d : fu0, fv = d > 0.15 ? (flag.v - pos.v) / d : fv0;
+  const ru = -fv, rv = fu;
+  const mid = { u: (pos.u + flag.u) / 2, v: (pos.v + flag.v) / 2 };
+  const toView = (p: Pt): Pt => { const du = p.u - mid.u, dv = p.v - mid.v; return { u: du * fu + dv * fv, v: du * ru + dv * rv }; };
+  const TOP = 150, BOTTOM = h - 110;
+  const span = Math.max(d, 9); // a short putt still shows the green around it
+  const s = ((BOTTOM - TOP) * 0.6) / span; // px per yard
+  const CY = (TOP + BOTTOM) / 2;
+  const projectView = (q: Pt) => ({ x: CX + q.v * s, y: CY - q.u * s, s });
+  const project = (p: Pt) => projectView(toView(p));
+  const unproject = (x: number, y: number): Pt => { const vu = (CY - y) / s, vv = (x - CX) / s; return { u: mid.u + vu * fu + vv * ru, v: mid.v + vu * fv + vv * rv }; };
+  return { toView, project, projectView, unproject, near: -1e9, horizon: -1e9, overhead: true, scale: s, h };
+}
 function overheadView(pos: Pt, green: Ellipse, fu: number, fv: number, includeBall = true, h = H): View {
   const ru = -fv, rv = fu;
   const toView = (p: Pt): Pt => { const du = p.u - green.c.u, dv = p.v - green.c.v; return { u: du * fu + dv * fv, v: du * ru + dv * rv }; };
@@ -369,6 +392,7 @@ export function HoleView({ holeNumber, par, yardage, strokeIndex, numbers, onNum
     const p = worldAt(e.clientX, e.clientY);
     if (!p) return;
     if (tracking && aimMode) onSetAim(p);
+    else if (tracking && play && onGreen(hole.green, pos)) return; // putting is logged with Missed / Holed, never a stray tap
     else if (tracking) onShot(snapToGreen(hole.green, p, 6)); // a tap just off the edge means "on the green"
     else setTapPos(p);
   };
